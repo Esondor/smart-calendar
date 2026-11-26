@@ -6,6 +6,8 @@ import { getPlan, calendarEvents } from './planner.js';
 import * as A from './actions.js';
 import { audit } from './logs.js';
 import { userFromBearer, resourceUrl, issuer } from './oauth.js';
+import { projectOrder, saveOrder } from './order.js';
+import { isOrdered } from './planner.js';
 
 const VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const PRI = ['asap', 'high', 'medium', 'low'];
@@ -69,7 +71,20 @@ function getProject(uid, pid, includeDone = true) {
   for (const t of rows) { const k = t.parent_id && ids.has(t.parent_id) ? t.parent_id : 0; if (!kids.has(k)) kids.set(k, []); kids.get(k).push(t); }
   const end = Math.max(0, ...rows.filter(t => t.status !== 'done').map(t => info.get(t.id)?.end || 0));
   return { project: clean({ id: p.id, name: p.name, kind: p.kind, target_date: p.target_date, levels: p.kind === 'outline' ? (p.meta.levels || ['Chapter', 'Section']) : null, planned_finish: fmt(end) }),
-    tree: (kids.get(0) || []).map(t => nodeOut(t, p.kind, info, kids)) };
+    tree: (kids.get(0) || []).map(t => nodeOut(t, p.kind, info, kids)),
+    ...(isOrdered(p.meta, p.kind) ? { order: orderOut(p) } : {}) };
+}
+// the order the planner works through the project: phases of units (sections or loose tasks)
+function orderOut(p) {
+  const title = id => get('SELECT title FROM tasks WHERE id = ?', id)?.title;
+  return projectOrder({ ...p, meta: JSON.stringify(p.meta) }).phases.map(ph => ({ phase: ph.name, units: ph.units.map(id => ({ id, title: title(id) })) }));
+}
+function setOrder(uid, a) {
+  const p = needProject(uid, a.project_id);
+  if (!Array.isArray(a.phases) || !a.phases.length) fail('phases is empty');
+  const r = saveOrder(p.id, { phases: a.phases.map(ph => ({ name: ph?.name, units: Array.isArray(ph?.units) ? ph.units : [] })) });
+  logActivity(p.id, uid, 'Claude: changed the order'); A.touchProject(p.id);
+  return { saved: true, order: orderOut(needProject(uid, p.id)), phases: r.phases.length };
 }
 function schedule(uid, days) {
   const now = Date.now(), to = now + Math.max(1, Math.min(31, +days || 7)) * 864e5;
@@ -179,7 +194,7 @@ export function applyChanges(uid, pid, changes, dry) {
   for (const d of doneOps) A.setDone(uid, d.id, 0, d.done, 'Claude');
   logActivity(p.id, uid, `Claude: ${lines.length} change${lines.length === 1 ? '' : 's'}`);
   A.touchProject(p.id);
-  return { applied: true, changes: lines };
+  return { applied: true, changes: lines, ...(refs.size ? { ids: Object.fromEntries(refs) } : {}) };
 }
 
 // puts the project's tasks back as they were before Claude's last batch
@@ -242,12 +257,13 @@ const FIELDS = {
 };
 const id = { type: ['integer', 'string'], description: 'Task id, or the ref of a task added earlier in the same batch' };
 const TOOLS = [
+  { name: 'get_guide', title: 'How Smart Calendar works', description: 'How projects, estimates and the writing order work, and the steps for common requests (update a project from a document, create a project, change the order). Read it once before the first change in a conversation.', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } },
   { name: 'list_projects', title: 'List projects', description: 'The user\'s projects with open work and the planned finish.', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } },
-  { name: 'get_project', title: 'Read a project', description: 'A project as a tree. Outline projects (e.g. a thesis): chapters → sections → items; items carry the estimate (duration_min), time spent, and when the planner has booked them. Read this before changing a project.',
+  { name: 'get_project', title: 'Read a project', description: 'A project as a tree, plus its order. Outline projects (thesis, book, report): chapters → sections → items. Items carry the estimate (duration_min), time spent (spent_min) and when the planner has booked them (first_block, last_block, late). "order" is the sequence the planner works through: phases of units (unit = a section with its items, or a task outside any section), with their ids. planned_finish vs target_date shows whether the project is on track. Always read this before changing a project; ids from here are what the other tools take.',
     inputSchema: { type: 'object', properties: { project_id: { type: 'integer' }, include_done: { type: 'boolean', description: 'Default true' } }, required: ['project_id'] }, annotations: { readOnlyHint: true } },
   { name: 'get_schedule', title: 'Read the schedule', description: 'Planned work blocks and calendar appointments for the coming days.',
     inputSchema: { type: 'object', properties: { days: { type: 'integer', minimum: 1, maximum: 31, description: 'Default 7' } } }, annotations: { readOnlyHint: true } },
-  { name: 'apply_changes', title: 'Change a project', description: 'Add, update, move, finish or delete tasks of one project in one batch. Always call it with dry_run: true first, show the user the returned list, and apply (dry_run: false) only after they agree. The planner reschedules right after.',
+  { name: 'apply_changes', title: 'Change a project', description: 'Add, update, move, finish or delete tasks of one project in one batch (all or nothing; an error names the change number). Call it with dry_run: true first, show the user the returned list, and send the same changes with dry_run: false only after they agree. The planner reschedules right after. New tasks get a "ref" so later changes in the same batch can use it as id or parent; the applied result maps each ref to its new id (for set_order). Example: [{"op":"add","ref":"c4","title":"Results","number":"4"}, {"op":"add","ref":"s41","parent":"c4","title":"Main effect","number":"4.1"}, {"op":"add","parent":"s41","title":"Write first draft","duration_min":180}, {"op":"update","id":123,"duration_min":240,"deadline":"2026-12-20"}, {"op":"move","id":130,"parent":"c4","position":0}, {"op":"done","id":118}]',
     inputSchema: { type: 'object', required: ['project_id', 'changes', 'dry_run'], properties: {
       project_id: { type: 'integer' }, dry_run: { type: 'boolean', description: 'true = only check and describe the changes' },
       changes: { type: 'array', maxItems: 300, items: { type: 'object', required: ['op'], properties: {
@@ -259,7 +275,10 @@ const TOOLS = [
         done: { type: 'boolean', description: 'done: false reopens' }, ...FIELDS } } } } }, annotations: { destructiveHint: true } },
   { name: 'undo_last_changes', title: 'Undo the last change', description: 'Puts the project back as it was before the last applied apply_changes batch (within 7 days). Edits made in the app since then are lost.',
     inputSchema: { type: 'object', properties: { project_id: { type: 'integer' } }, required: ['project_id'] }, annotations: { destructiveHint: true } },
-  { name: 'create_project', title: 'Create a project', description: 'A new empty project; fill it with apply_changes. kind outline = chapters/sections/items (thesis, report, course); board = a plain list of tasks.',
+  { name: 'set_order', title: 'Set the order', description: 'Set the order the planner works through a project (for a thesis: the writing order), as named phases of units. A unit is a section (its items follow in outline order) or a task outside any section; never a chapter or an item inside a section. Send the complete order: every unit id from get_project "order", rearranged (units left out are put back after their outline neighbour). Phase names say what the step is, e.g. "Ch. 3 results" or "Figures and references". Show the user the proposed order and apply it after they agree. Example: {"project_id":5,"phases":[{"name":"Methods first","units":[41,42]},{"name":"Results","units":[51,52,53]},{"name":"Introduction last","units":[11]}]}',
+    inputSchema: { type: 'object', required: ['project_id', 'phases'], properties: { project_id: { type: 'integer' },
+      phases: { type: 'array', items: { type: 'object', required: ['units'], properties: { name: { type: 'string' }, units: { type: 'array', items: { type: 'integer' }, description: 'Unit ids in order' } } } } } } },
+  { name: 'create_project', title: 'Create a project', description: 'A new empty project; then fill it with one apply_changes batch (chapters, sections and items with refs and estimates) and, if the work should not follow the outline, set_order. kind outline = chapters → sections → items (thesis, book, report, course, anything with parts); board = a plain list of tasks (errands, small projects). target_date is the date it should be finished by.',
     inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, kind: { type: 'string', enum: ['outline', 'board'], description: 'Default outline' },
       target_date: { type: 'string', description: 'YYYY-MM-DD' }, levels: { type: 'array', items: { type: 'string' }, description: 'Outline: names of the two levels, default ["Chapter", "Section"]' },
       schedule: { type: 'string', enum: ['work', 'personal'], description: 'Which hours it is planned into; default work' } } } },
@@ -267,16 +286,36 @@ const TOOLS = [
     inputSchema: { type: 'object', required: ['project_id'], properties: { project_id: { type: 'integer' }, name: { type: 'string' }, target_date: { type: ['string', 'null'] },
       schedule: { type: 'string', enum: ['work', 'personal'] }, levels: { type: 'array', items: { type: 'string' } } } } },
 ];
-const INSTRUCTIONS = `Smart Calendar plans the user's tasks into the free time of their calendar. Projects of kind "outline" (such as a thesis) are trees: chapters → sections → items; only items (leaves) carry an estimate (duration_min) and get booked.
-To bring a project in line with a document: read it with get_project, compare, then send all edits as one apply_changes batch with dry_run: true, show the user the list it returns, and apply with dry_run: false once they agree. Keep ids of existing tasks (update or move them) rather than deleting and re-adding, so logged work stays attached. Tasks with logged work cannot be deleted; mark them done. Times are the user's local time.`;
+const INSTRUCTIONS = `Smart Calendar is the user's planner: it books their tasks into the free time of their calendar, around appointments and within their work or personal hours, and re-plans after every change.
+
+How it works
+- Projects are "outline" (chapters → sections → items: thesis, book, report, course) or "board" (a list of tasks). Only leaves (items, board tasks) are booked; chapters and sections are containers.
+- A leaf's duration_min is its estimate; the planner books what is left (duration_min − spent_min). planned: false keeps a task off the schedule. A task deadline is hard; the project target_date is the overall goal.
+- Outline projects are worked through in their order (for a thesis: the writing order), which is separate from the outline and its numbering: named phases of units, a unit being a section with all its items or a task outside any section. get_project shows it under "order"; set_order changes it. Within a section, items follow their outline order.
+- planned_finish in list_projects and get_project is when the planner expects the last block; compare it with target_date.
+
+Workflows
+1. Bring a project in line with a document (e.g. a thesis draft): get_project → compare structure, estimates and what is finished → one apply_changes batch with dry_run: true → show the list → apply with dry_run: false → if the writing order should change, propose it and call set_order → get_project and report planned_finish against target_date.
+2. Create a project from a description: create_project → one apply_changes batch: chapters with refs, sections with parent refs, items with parent refs and duration_min → set_order with the ids from the result if the work order differs from the outline → report planned_finish.
+3. Change only the writing order: get_project → rearrange the unit ids of "order" → show the proposed phases → set_order with the complete list.
+4. Behind schedule: show which phases end after target_date and propose options (smaller estimates, items not planned for now, a later target); the user decides.
+
+Conventions
+- Keep ids: update or move existing tasks instead of deleting and re-adding them, so logged work stays attached. Tasks with logged work cannot be deleted; mark them done.
+- Numbers: chapters "3", sections "3.2". When adding or moving, renumber the affected siblings in the same batch.
+- Estimates in minutes, realistic for the user; split work over about 4 hours into several items. Mark done only what the document clearly shows as finished; ask when unsure.
+- One batch per request (up to 300 changes); if any change fails, nothing is applied. undo_last_changes reverts the last applied batch of tasks (not the order).
+- Dates are YYYY-MM-DD; times are the user's local time. Answer in the user's language.`;
 
 function call(uid, name, a = {}) {
   switch (name) {
+    case 'get_guide': return { guide: INSTRUCTIONS };
     case 'list_projects': return { projects: listProjects(uid) };
     case 'get_project': return getProject(uid, a.project_id, a.include_done !== false);
     case 'get_schedule': return schedule(uid, a.days);
     case 'apply_changes': if (typeof a.dry_run !== 'boolean') fail('dry_run is required'); return applyChanges(uid, a.project_id, a.changes, a.dry_run);
     case 'undo_last_changes': return undoLast(uid, a.project_id);
+    case 'set_order': return setOrder(uid, a);
     case 'create_project': return createProject(uid, a);
     case 'update_project': return updateProject(uid, a);
     default: fail(`Unknown tool ${name}`);

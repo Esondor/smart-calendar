@@ -21,6 +21,7 @@ import { mailReady, sendMail } from './mail.js';
 import { notify, NOTIFY_TYPES } from './notify.js';
 import { findSlot, rulesOf, ruleOf } from './reschedule.js';
 import { eventToTask, createFlexible } from './flex.js';
+import { projectOrder, saveOrder } from './order.js';
 import * as maps from './maps.js';
 import { homeChanged, refreshTravel, resolvePin } from './travel.js';
 import { restoreBackup } from './restore.js';
@@ -183,6 +184,15 @@ export default async function apiRoutes(app) {
     const us = usersOfProject(pid);
     run('DELETE FROM project_members WHERE project_id = ? AND user_id = ?', pid, +req.params.uid);
     markDirty(us); notifyUsers(us, 'tasks'); return membersOf(pid);
+  });
+  // the order the project is worked through (outline projects: the writing order); the planner follows it
+  app.get('/api/projects/:id/order', async req => projectOrder(get('SELECT * FROM projects WHERE id = ?', needProject(req.user.id, req.params.id))));
+  app.put('/api/projects/:id/order', async req => {
+    const pid = needProject(req.user.id, req.params.id), r = saveOrder(pid, req.body);
+    const last = get('SELECT user_id, at, text FROM activity WHERE project_id = ? ORDER BY id DESC LIMIT 1', pid);   // one entry for a run of moves
+    if (!(last?.text === 'Changed the order' && last.user_id === req.user.id && Date.now() - last.at < 30 * 60000)) logActivity(pid, req.user.id, 'Changed the order');
+    A.touchProject(pid);
+    return r;
   });
   // which calendar this project's blocks go to (per user); shared: every member writes into the same Google calendar
   app.post('/api/projects/:id/calendar', async req => {

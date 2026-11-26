@@ -144,6 +144,15 @@ for (const [ci, [ct, secs]] of chapters.entries()) {
   }
 }
 
+// its order: not the book's order (the trees are written before the birds, the introduction last)
+const secId = t => get('SELECT id FROM tasks WHERE project_id = ? AND title = ?', book.id, t).id;
+await call('PUT', `/api/projects/${book.id}/order`, { phases: [
+  { name: 'Start with what is ready', units: ['Why a field guide', 'Broadleaf'].map(secId) },
+  { name: 'Trees', units: ['Conifers'].map(secId) },
+  { name: 'Birds', units: ['Garden birds', 'Water birds'].map(secId) },
+  { name: 'Front matter', units: ['How to use this book'].map(secId) },
+] });
+
 // ---------- what was done: sessions and ticked-off tasks in the past days ----------
 const sess = (t, d, h, m, mins, done = 0) => run(`INSERT INTO work_log(user_id, task_id, period, kind, start, end, done) VALUES (?, ?, 0, 'work', ?, ?, ?)`, me, t.id, at(d, h, m), at(d, h, m) + mins * 60000, done);
 const finish = async (t, d, h, m) => { await call('POST', `/api/tasks/${t.id}/done`, { period: 0 }); run('UPDATE tasks SET done_at = ? WHERE id = ?', at(d, h, m), t.id); };
@@ -169,9 +178,11 @@ const snap = {};
 const rec = async (key, url = key, empty) => { snap[key] = await call('GET', url).catch(e => { if (empty === undefined) throw e; return empty; }); };
 await rec('/api/bootstrap'); await rec('/api/projects'); await rec('/api/tasks'); await rec('/api/accounts'); await rec('/api/stats');
 await rec('/api/clashes'); await rec('/api/locations'); // served by other parts of the server (sign-in, tokens): nothing to show in a demo
+snap['/api/me/claude'] = { on: true, url: 'https://plan.example.com/mcp', connections: [{ id: 1, name: 'Claude', created_at: at(-6, 9), last_used: at(0, 13, 50) }] };
 snap['/api/me/tokens'] = []; snap['/api/me/sessions'] = [{ id: 'demo', created_at: Date.now(), last_seen: Date.now(), ua: 'This browser', current: true }]; snap['/api/passkeys'] = [];
 await rec('/api/plan', `/api/plan?from=${at(-28, 0)}&to=${at(42, 0)}`);
 for (const p of snap['/api/projects']) await rec('/api/activity?project=' + p.id);
+for (const p of snap['/api/projects'].filter(p => p.kind === 'outline')) await rec(`/api/projects/${p.id}/order`);
 Object.assign(snap['/api/bootstrap'], { version: 'demo', must2fa: false });
 await app.close();
 if (process.env.DEMO_DATA_DIR) { const { newToken } = await import('../server/ext.js'); fs.writeFileSync(path.join(process.env.DEMO_DATA_DIR, 'demo-token'), newToken(me, 'api', 'Mac'));

@@ -3,6 +3,7 @@ import { openTask } from './taskedit.js';
 import { I } from './icons.js';
 import OutlineView from './outline.js';
 import ProjectFocus from './pfocus.js';
+import OrderView from './order.js';
 import { isLeaf } from './tasks.js';
 
 const COLORS = ['#1971c2', '#0f5f5c', '#c2255c', '#e8590c', '#7048e8', '#2b8a3e', '#e67700', '#0c8599', '#868e96'];
@@ -108,9 +109,10 @@ export default function ProjectView({ id }) {
   const [view, setView] = useState(() => { try { return localStorage.getItem('pv-' + id) || 'overview'; } catch { return 'overview'; } });
   if (!p) return html`<div class="empty">Project not found.</div>`;
   const pick = v => { setView(v); try { localStorage.setItem('pv-' + id, v); } catch {} };
-  const seg = html`<div class="seg pvseg"><button class=${view === 'overview' ? 'on' : ''} onClick=${() => pick('overview')}>Overview</button><button class=${view !== 'overview' ? 'on' : ''} onClick=${() => pick('detail')}>${p.kind === 'outline' ? 'Outline' : 'Board'}</button></div>`;
+  const seg = html`<div class="seg pvseg"><button class=${view === 'overview' ? 'on' : ''} onClick=${() => pick('overview')}>Overview</button><button class=${view === 'detail' || (view === 'order' && p.kind !== 'outline') ? 'on' : ''} onClick=${() => pick('detail')}>${p.kind === 'outline' ? 'Outline' : 'Board'}</button>${p.kind === 'outline' && html`<button class=${view === 'order' ? 'on' : ''} onClick=${() => pick('order')}>Order</button>`}</div>`;
   if (view === 'overview') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/><span class="grow"></span>
     <span class="avs">${p.members.map(m => html`<${Avatar} id=${m.id}/>`)}</span><button class="icon" title="Share" aria-label="Share" onClick=${() => share(p)}>${I('people')}</button><button class="icon" title="Project Settings" onClick=${() => projectSettings(p)}>${I('gear')}</button></div><${ProjectFocus} p=${p}/></div>`;
+  if (p.kind === 'outline' && view === 'order') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/></div><${OrderView} p=${p}/></div>`;
   if (p.kind === 'outline') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/></div><${OutlineView} p=${p}/></div>`;
   const tasks = st.tasks.filter(t => t.project_id === p.id && isLeaf(t));
   const cols = p.columns.length ? p.columns : ['To do', 'Done'];

@@ -5,6 +5,7 @@ import { settingsOf, taskRow, membersOf } from './models.js';
 import { isoDate, addDays, wd, tm, at, dayStart, periodOf, periodRange } from './time.js';
 import { notifyUsers } from './bus.js';
 import { travelMode, physical, placeOf, placeKey, ruleOf, pinUrl } from './travel.js';
+import { orderRanks } from './order.js';
 
 const PLANS = new Map();          // uid -> { at, next, sig, blocks, info, items }
 const dirty = new Set(), byClock = new Set();   // byClock: re-planned only because time passed
@@ -56,16 +57,17 @@ export function workUnits(uid, now = Date.now(), horizonDays = 62) {
     WHERE t.status != 'done' AND p.archived = 0`, uid);
   const parents = new Set(all(`SELECT DISTINCT parent_id FROM tasks WHERE parent_id IS NOT NULL AND status != 'done'`).map(r => r.parent_id));
   const units = [];
-  const ordered = new Map();
+  const ordered = new Map(), ranks = new Map();   // ordered projects: each task's place in the project's order (order.js)
   for (const r of rows) {
     const t = taskRow(r);
-    if (!ordered.has(r.project_id)) { let m = {}; try { m = JSON.parse(r.p_meta || '{}'); } catch {} ordered.set(r.project_id, isOrdered(m, r.p_kind)); }
+    if (!ordered.has(r.project_id)) { let m = {}; try { m = JSON.parse(r.p_meta || '{}'); } catch {} ordered.set(r.project_id, isOrdered(m, r.p_kind));
+      if (isOrdered(m, r.p_kind)) ranks.set(r.project_id, orderRanks({ id: r.project_id, meta: r.p_meta })); }
     if (parents.has(t.id) || t.meta.level === 'chapter' || t.meta.level === 'section') continue;   // containers are not scheduled themselves
     if (t.wait_event && !(t.wait_until && t.wait_until <= now)) continue;   // follow-up still waiting for its event
     if (!t.recur) {
       if (assigneeOf(t) !== uid) continue;
       units.push({ t, period: null, key: keyOf(t.id), spent: t.spent, earliest: Math.max(t.start_after ? dayStart(t.start_after) : 0, t.wait_until || 0),
-        deadline: t.deadline ? dayStart(addDays(t.deadline, 1)) : (r.p_target ? dayStart(addDays(r.p_target, 1)) : null), hardDeadline: !!t.deadline, ordered: ordered.get(r.project_id) });
+        deadline: t.deadline ? dayStart(addDays(t.deadline, 1)) : (r.p_target ? dayStart(addDays(r.p_target, 1)) : null), hardDeadline: !!t.deadline, ordered: ordered.get(r.project_id), rank: ranks.get(r.project_id)?.get(t.id) });
       continue;
     }
     const rc = { ...t.recur, anchor: t.recur.anchor || isoDate(t.created_at) };
@@ -250,7 +252,7 @@ function applyProjectOrder(units, actKey) {
   units.forEach((u, i) => { if (u.ordered && u.period == null && u.t.auto) { if (!byP.has(u.t.project_id)) byP.set(u.t.project_id, []); byP.get(u.t.project_id).push(i); } });
   for (const idx of byP.values()) {
     const L = idx.map(i => units[i]).sort((a, b) => ((b.key === actKey) - (a.key === actKey)) || ((a.t.do_next ? 0 : 1) - (b.t.do_next ? 0 : 1)) || ((a.t.do_next || 0) - (b.t.do_next || 0)) ||
-      (a.t.grp - b.t.grp) || (a.t.sort - b.t.sort) || (a.t.id - b.t.id));
+      ((a.rank ?? Infinity) - (b.rank ?? Infinity) || 0) || (a.t.grp - b.t.grp) || (a.t.sort - b.t.sort) || (a.t.id - b.t.id));
     idx.forEach((i, j) => { units[i] = L[j]; L[j].after = j ? L[j - 1].key : null; L[j].chain = L; });
   }
   return units;

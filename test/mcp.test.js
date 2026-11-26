@@ -142,3 +142,15 @@ test('only the token owner\'s projects; turning Claude off cuts the connection',
   run(`UPDATE users SET settings = json_remove(settings, '$.claude') WHERE id = ?`, uid);
   assert.equal((await rpc('tools/list', {})).statusCode, 401);
 });
+
+test('guide and new ids for set_order', async () => {
+  run(`UPDATE users SET settings = json_set(settings, '$.claude', json('true')) WHERE id = ?`, uid);
+  assert.match((await tool('get_guide', {})).guide, /writing order/);
+  const r = await tool('apply_changes', { project_id: pid, dry_run: false, changes: [{ op: 'add', ref: 'c9', title: 'Outlook', number: '9' }, { op: 'add', ref: 's91', parent: 'c9', title: 'Next steps' }, { op: 'add', parent: 's91', title: 'Write it', duration_min: 60 }] });
+  assert.ok(r.ids.s91 > 0);
+  const p = await tool('get_project', { project_id: pid });
+  const units = p.order.flatMap(ph => ph.units.map(u => u.id));
+  assert.ok(units.includes(r.ids.s91));
+  const o = await tool('set_order', { project_id: pid, phases: [{ name: 'First', units: [r.ids.s91] }, { name: 'Rest', units: units.filter(x => x !== r.ids.s91) }] });
+  assert.equal(o.order[0].units[0].title, 'Next steps');
+});

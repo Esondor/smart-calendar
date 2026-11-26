@@ -54,6 +54,9 @@
     if (p === '/api/timer/stop') return { minutes: stop(false) };
     if (p === '/api/timer/more') { for (const u of unitsOf(+body.task)) u.duration = (u.duration || 0) + (+body.minutes || 30); const t = taskOf(body.task); if (t) t.duration = (t.duration || 0) + (+body.minutes || 30); return { ok: true }; }
     if (p === '/api/projects' && method === 'POST') { const x = { id: ++nextId, color: '#1971c2', kind: 'board', columns: ['To do', 'In progress', 'Done'], meta: {}, archived: false, members: [{ id: D('/api/bootstrap').me.id, name: D('/api/bootstrap').me.name, role: 'owner' }], owner_id: D('/api/bootstrap').me.id, ...body }; D('/api/projects').push(x); return x; }
+    if (p === '/api/me/claude' && method === 'PUT') { D(p).on = !!body.on; if (!body.on) D(p).connections = []; return { on: D(p).on }; }
+    if (/^\/api\/me\/claude\/\d+$/.test(p) && method === 'DELETE') { D('/api/me/claude').connections = []; return { ok: true }; }
+    if (/^\/api\/projects\/\d+\/order$/.test(p) && method === 'PUT') { db[p] = { phases: body.phases }; return db[p]; }
     if ((m = p.match(/^\/api\/projects\/(\d+)$/)) && method === 'PATCH') { const x = D('/api/projects').find(y => y.id === +m[1]); return x ? Object.assign(x, body) : {}; }
     if (p === '/api/clashes' && method === 'POST') {   // your choice wins over the automatic one; dismissed ones go
       const c = D('/api/clashes'), x = c.items.find(i => i.key === body.key);
