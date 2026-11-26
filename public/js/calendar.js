@@ -140,6 +140,11 @@ export default function CalendarView() {
     return () => { el.removeEventListener('touchstart', start); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', end); el.removeEventListener('touchcancel', end); };
   }, [month, mobile, zoom, hh, focus, cw, from]);
   const ticking = useRef(false);
+  // more days/weeks are rendered only once scrolling has come to rest: on a phone the momentum (and the snapping in
+  // month view) carries on after the finger lifts, and moving the window under it sent it scrolling on without end
+  const live = useRef({}), idle = useRef(null);
+  live.current = { from, unit, month, n };
+  useEffect(() => () => clearTimeout(idle.current), []);
   function onScroll() {
     if (ticking.current || !unit) return; ticking.current = true;
     requestAnimationFrame(() => {
@@ -147,11 +152,16 @@ export default function CalendarView() {
       const pos = month ? el.scrollTop : el.scrollLeft, i = Math.round(pos / unit);
       if (month) { const mid = firstOfMonth(addDays(from, (i + 2) * 7 + 3)); if (mid !== focus) setFocus(mid); }
       else { const f = addDays(from, i); if (f !== focus) setFocus(f); }
-      if (busy() || pending.current) return;
-      const max = month ? MWIN - 5 : WIN - n, sh = month ? MSHIFT : SHIFT, stepDays = month ? sh * 7 : sh;
-      if (i < 4) { pending.current = { keep: pos + sh * unit }; setFrom(addDays(from, -stepDays)); }
-      else if (i > max - 4) { pending.current = { keep: pos - sh * unit }; setFrom(addDays(from, stepDays)); }
+      clearTimeout(idle.current); idle.current = setTimeout(edge, 200);
     });
+  }
+  function edge() {
+    const el = sc.current, L = live.current; if (!el || !L.unit) return;
+    if (busy() || touch.current || pending.current) { idle.current = setTimeout(edge, 200); return; }
+    const pos = L.month ? el.scrollTop : el.scrollLeft, i = Math.round(pos / L.unit);
+    const max = L.month ? MWIN - 5 : WIN - L.n, sh = L.month ? MSHIFT : SHIFT, stepDays = L.month ? sh * 7 : sh;
+    if (i < 4) { pending.current = { keep: pos + sh * L.unit }; setFrom(addDays(L.from, -stepDays)); }
+    else if (i > max - 4) { pending.current = { keep: pos - sh * L.unit }; setFrom(addDays(L.from, stepDays)); }
   }
   // the day to keep when switching: from month, the day last shown in day/week if it is in this month, else today if it is,
   // else the 1st; into month, today's month if today is on screen
