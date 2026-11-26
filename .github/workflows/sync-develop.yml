@@ -1,0 +1,29 @@
+# Every push to `main` is merged into `develop`, so `develop` (what the NAS runs) always has the latest of both.
+# A merge conflict fails this run; then merge main into develop by hand.
+name: Sync develop
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: sync-develop
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge main into develop
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          if ! git ls-remote --exit-code --heads origin develop >/dev/null; then git push origin HEAD:refs/heads/develop; exit 0; fi
+          git checkout -B develop origin/develop
+          git merge --no-edit origin/main
+          git push origin develop
