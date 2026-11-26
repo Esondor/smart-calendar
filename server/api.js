@@ -88,7 +88,7 @@ export default async function apiRoutes(app) {
   // ---------- bootstrap ----------
   app.get('/api/bootstrap', async req => { if (req.user.is_admin) learnBaseUrl(req); return {
     me: publicUser(req.user), mail: mailReady(), maps: maps.mapsReady(), settings: settingsOf(req.user), users: allUsers(),
-    google: google.enabled(), vapid: vapidPublicKey(), baseUrl: baseUrl(), version: '1.0.0',
+    google: google.enabled(), vapid: vapidPublicKey(), baseUrl: baseUrl(), version: '1.0.1',
     hasAccounts: !!get('SELECT 1 FROM accounts WHERE user_id = ?', req.user.id), must2fa: needs2fa(req.user),
   }; });
   app.put('/api/settings', async req => {
