@@ -72,24 +72,24 @@
     }
     if ((m = p.match(/^\/api\/tasks\/(\d+)\/pin$/))) {   // moved in the calendar
       const b = plan().blocks.find(x => plan().units[x.key]?.taskId === +m[1] && (body.oldStart == null || x.s === +body.oldStart));
-      if (b) { if (body.s == null) b.pinned = false; else Object.assign(b, { s: +body.s, e: +body.e, pinned: true }); }
+      if (b) { if (body.s == null) b.pinned = false; else Object.assign(b, { s: +body.s, e: +body.e, pinned: true }); replan(); }
       return { ok: true };
     }
     if ((m = p.match(/^\/api\/tasks\/(\d+)\/auto$/))) { plan().blocks.filter(x => plan().units[x.key]?.taskId === +m[1]).forEach(b => { b.pinned = false; }); return { ok: true }; }
     if ((m = p.match(/^\/api\/tasks\/(\d+)\/next$/))) { const k = plan().nextKeys.find(x => plan().nextUnits[x]?.taskId === +m[1]); if (k) plan().nextKeys = [k, ...plan().nextKeys.filter(x => x !== k)]; return { ok: true }; }
     if (p === '/api/events' && method === 'POST') {
-      const c = cal(body.calendar_id), e = { id: ++nextId, title: body.title, start: +body.start, end: +body.end, all_day: !!body.all_day, location: body.location || null, cal: c.name, color: c.color, calendar_id: c.id, blocks: true, before: 0, after: 0, editable: true, alsoIn: [] };
-      plan().events.push(e); return e;
+      const c = cal(body.calendar_id), e = { id: ++nextId, title: body.title, start: +body.start, end: +body.end, all_day: !!body.all_day, location: body.location || null, cal: c.name, color: c.color, calendar_id: c.id, blocks: true, before: 10, after: 10, editable: true, alsoIn: [] };
+      plan().events.push(e); replan(); return e;
     }
     if ((m = p.match(/^\/api\/events\/(\d+)$/))) {
       const e = evOf(m[1]); if (!e) return { ok: true };
       if (method === 'DELETE') { plan().events = plan().events.filter(x => x !== e); return { ok: true }; }
-      Object.assign(e, ['title', 'start', 'end', 'location', 'all_day'].reduce((a, k) => (k in body ? { ...a, [k]: body[k] } : a), {})); return e;
+      Object.assign(e, ['title', 'start', 'end', 'location', 'all_day'].reduce((a, k) => (k in body ? { ...a, [k]: body[k] } : a), {})); replan(); return e;
     }
     if ((m = p.match(/^\/api\/events\/(\d+)\/done$/))) { const e = evOf(m[1]); if (e) { e.done = true; if (body.end) e.end = +body.end; } return { ok: true }; }
-    if (p === '/api/appts' && method === 'POST') { const id = ++nextId; plan().busy.push({ kind: 'appt', s: +body.start, e: +body.end, t: body.title || 'Blocked', id }); return { id }; }
+    if (p === '/api/appts' && method === 'POST') { const id = ++nextId; plan().busy.push({ kind: 'appt', s: +body.start, e: +body.end, t: body.title || 'Blocked', id }); replan(); return { id }; }
     if ((m = p.match(/^\/api\/appts\/(\d+)$/))) { plan().busy = plan().busy.filter(b => b.id !== +m[1]); return { ok: true }; }
-    if (p === '/api/now/break' || p === '/api/now/interrupt') { stop(false); const n = Date.now(); plan().busy.push({ kind: 'appt', s: n, e: n + (+body.minutes || 15) * 60000, t: body.title || 'Break', id: ++nextId }); return { ok: true }; }
+    if (p === '/api/now/break' || p === '/api/now/interrupt') { stop(false); const n = Date.now(); plan().busy.push({ kind: 'appt', s: n, e: n + (+body.minutes || 15) * 60000, t: body.title || 'Break', id: ++nextId }); replan(); return { ok: true }; }
     if (p === '/api/flexible') { const t = { id: ++nextId, title: body.title, status: 'todo', duration: +body.minutes || 30, meta: { win: body.win }, points: [], project_id: (D('/api/projects')[0] || {}).id, created_at: Date.now(), updated_at: Date.now() }; tasks().push(t); return { id: t.id }; }
     if ((m = p.match(/^\/api\/calendars\/(\d+)$/))) { const c = cal(m[1]); Object.assign(c, body); return c; }
     if ((m = p.match(/^\/api\/accounts\/(\d+)$/)) && method === 'PATCH') { const a = D('/api/accounts').find(x => x.id === +m[1]) || {}; a.cfg = { ...(a.cfg || {}), ...body }; return a; }
@@ -112,6 +112,21 @@
     for (const u of unitsOf(a.task_id)) u.spent = (u.spent || 0) + min;
     if (end - a.since >= 60000) plan().log.push({ task_id: a.task_id, start: a.since, end, title: a.title, color: projOf(t).color, p_name: projOf(t).name, kind: a.mode === 'r' ? 'research' : 'work', done: done ? 1 : 0 });
     plan().active = null; return min;
+  }
+  // a simple re-plan for the demo: planned blocks (not pinned) that an appointment, a break or blocked time now covers
+  // move to the next free time after it, and the blocks behind them follow in their order
+  function replan() {
+    const P = plan(), fixed = [
+      ...P.events.filter(e => e.blocks && !e.all_day && !e.hidden).map(e => [e.start - (e.before || 0) * 60000, e.end + (e.after || 0) * 60000]),
+      ...P.busy.map(b => [b.s, b.e]),
+      ...P.blocks.filter(b => b.pinned).map(b => [b.s, b.e]),
+    ].sort((x, y) => x[0] - y[0]);
+    let cur = 0;
+    for (const b of P.blocks.filter(b => !b.pinned).sort((x, y) => x.s - y.s)) {
+      const d = b.e - b.s; let s = Math.max(b.s, new Date(b.s).toDateString() === new Date(cur).toDateString() ? cur : 0);
+      for (let moved = true; moved;) { moved = false; for (const [fs, fe] of fixed) if (fs < s + d && fe > s) { s = fe; moved = true; } }
+      b.s = s; b.e = s + d; cur = b.e;
+    }
   }
   function read(p, q) {
     if (p === '/api/plan') return plan();
