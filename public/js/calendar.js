@@ -62,15 +62,20 @@ export default function CalendarView() {
   // the rendered window only moves while nothing is animating or under a finger (moving it mid-slide sent the slide on
   // to the old place, past the next edge, and on and on)
   const anim = useRef(null), touch = useRef(null), busy = () => !!anim.current || touch.current?.axis === 'x';
-  // phone: the day position is the app's alone. iOS resets the (hidden) sideways scroll position of the calendar when
-  // you scroll up or down, which looked like a jump weeks back; such a change is put back, never read as navigation
-  const want = useRef(null), guard = mobile && !month;
-  const setLeft = (el, v) => { el.scrollLeft = v; want.current = el.scrollLeft; };
+  // phone: the days are moved sideways by the app (a transform of the strip, the hours column held in place), not
+  // through the scroller's sideways position: iOS resets that one while you scroll up or down, which jumped weeks back
+  // and, put back every frame, flickered. The scroller itself only scrolls up and down.
+  const want = useRef(null), guard = mobile && !month && matchMedia('(pointer:coarse)').matches, track = useRef();
+  const applyX = () => { const t = track.current; if (!guard || !t) return; const x = want.current || 0;
+    t.style.transform = `translate3d(${-x}px,0,0)`; t.querySelectorAll(':scope > .crow > .corner, :scope > .ctop > .crow > .corner').forEach(c => { c.style.transform = `translate3d(${x}px,0,0)`; }); };
+  const setLeft = (el, v) => { if (guard) { want.current = Math.max(0, v); applyX(); onScroll(); } else el.scrollLeft = v; };   // no scroll event here: tell the title
+  const getLeft = el => guard ? want.current || 0 : el.scrollLeft;
+  useLayoutEffect(applyX);
   const prevCw = useRef(0);   // turned the phone: the same day at the new width
   useLayoutEffect(() => { const el = sc.current; if (guard && el && want.current != null && prevCw.current && cw && prevCw.current !== cw) setLeft(el, Math.round(want.current / prevCw.current) * cw); prevCw.current = cw; }, [cw]);
   const slide = (to, ms) => {   // our own ease-out slide (phone): stops where a finger catches it
     const el = sc.current; if (!el) return;
-    const from0 = el.scrollLeft, d = to - from0; if (Math.abs(d) < 1) { setLeft(el, to); return; }
+    const from0 = getLeft(el), d = to - from0; if (Math.abs(d) < 1) { setLeft(el, to); return; }
     ms = ms || Math.min(380, Math.max(200, Math.abs(d) / (cw || 1) * 140));
     const t0 = performance.now(), me = {}; anim.current = me;
     const step = t => { if (anim.current !== me) return;
@@ -82,17 +87,16 @@ export default function CalendarView() {
     const t = month ? monday(day) : day, i = month ? dayIdx(from, t) / 7 : dayIdx(from, t);
     const max = month ? MWIN - 5 : WIN - n;
     if (i < 5 || i > max - 5) { anim.current = null; pending.current = { day: t, now: false }; setFrom(month ? addDays(t, -70) : addDays(t, -21)); return; }   // too near an edge: re-centre first
+    if (guard) return smooth ? slide(i * unit) : setLeft(sc.current, i * unit);
     if (smooth && !month && mobile) return slide(i * unit);
     sc.current?.scrollTo({ [month ? 'top' : 'left']: i * unit, behavior: smooth ? 'smooth' : 'auto' });
-    if (guard) want.current = i * unit;
   };
   useLayoutEffect(() => {
     const el = sc.current, p = pending.current; if (!el || !unit || !p) return;
     pending.current = null;
-    if (p.keep != null) { el.scrollTo({ [month ? 'top' : 'left']: p.keep, behavior: 'auto' }); if (guard) want.current = el.scrollLeft; return; }
+    if (p.keep != null) { if (guard) setLeft(el, p.keep); else el.scrollTo({ [month ? 'top' : 'left']: p.keep, behavior: 'auto' }); return; }
     const i = month ? dayIdx(from, monday(p.day)) / 7 : dayIdx(from, p.day);
-    el.scrollTo({ [month ? 'top' : 'left']: i * unit, behavior: 'auto' });
-    if (guard) want.current = el.scrollLeft;
+    if (guard) setLeft(el, i * unit); else el.scrollTo({ [month ? 'top' : 'left']: i * unit, behavior: 'auto' });
     if (!month && p.now !== false) el.scrollTop = Math.max(0, (new Date().getHours() - H0 - 1.5) * hh);
   });
   // phone, like a calendar app: the days follow the finger sideways and settle on the day that shows the most when
@@ -101,14 +105,14 @@ export default function CalendarView() {
   useEffect(() => {
     const el = sc.current; if (!el || month || !mobile) return;
     const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-    const settle = () => { if (cw) slide(Math.round((want.current ?? el.scrollLeft) / cw) * cw); };
+    const settle = () => { if (cw) slide(Math.round(getLeft(el) / cw) * cw); };
     const start = e => {
       if (e.touches.length === 2) { anim.current = null; const r = el.getBoundingClientRect(), my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top;
         touch.current = { pinch: true, d0: dist(e.touches), z0: zoom, hours: (el.scrollTop + my) / hh, my }; return; }
       if (e.touches.length !== 1) return;
       const caught = !!anim.current; anim.current = null;   // a finger stops a slide where it is
       touch.current = e.target.closest('.ev.sel, .ev.drag') ? null   // a selected block is being moved, not the days
-        : { x: e.touches[0].clientX, y: e.touches[0].clientY, sl: want.current ?? el.scrollLeft, st: el.scrollTop, axis: null, caught, t0: e.timeStamp, pts: [[e.touches[0].clientX, e.timeStamp]] };
+        : { x: e.touches[0].clientX, y: e.touches[0].clientY, sl: getLeft(el), st: el.scrollTop, axis: null, caught, t0: e.timeStamp, pts: [[e.touches[0].clientX, e.timeStamp]] };
     };
     const move = e => {
       const g = touch.current; if (!g) return;
@@ -141,7 +145,7 @@ export default function CalendarView() {
       const q = g.pts, [x1, t1] = q[q.length - 1], [x0, t0] = q[0], v = t1 > t0 ? (x1 - x0) / (t1 - t0) : 0;   // px per ms, + = finger to the right
       // a quick swipe turns exactly one day; a slower drag, where the days follow the finger, ends on the day that
       // shows the most
-      const i0 = Math.round(g.sl / cw), pos = el.scrollLeft, quick = t1 - g.t0 < 300 && Math.abs(v) > 0.2 && Math.abs(pos - g.sl) > 10;
+      const i0 = Math.round(g.sl / cw), pos = getLeft(el), quick = t1 - g.t0 < 300 && Math.abs(v) > 0.2 && Math.abs(pos - g.sl) > 10;
       let i = quick ? i0 + (pos > g.sl ? 1 : -1) : Math.round(pos / cw);
       i = Math.max(0, Math.min(span - n, i));
       slide(i * cw);
@@ -154,15 +158,13 @@ export default function CalendarView() {
   // more days/weeks are rendered only once scrolling has come to rest: on a phone the momentum (and the snapping in
   // month view) carries on after the finger lifts, and moving the window under it sent it scrolling on without end
   const live = useRef({}), idle = useRef(null);
-  live.current = { from, unit, month, n, guard };
+  live.current = { from, unit, month, n, getLeft };
   useEffect(() => () => clearTimeout(idle.current), []);
   function onScroll() {
-    const el0 = sc.current;
-    if (guard && el0 && want.current != null && !anim.current && touch.current?.axis !== 'x' && Math.abs(el0.scrollLeft - want.current) > 1) el0.scrollLeft = want.current;
     if (ticking.current || !unit) return; ticking.current = true;
     requestAnimationFrame(() => {
       ticking.current = false; const el = sc.current; if (!el) return;
-      const pos = month ? el.scrollTop : guard && want.current != null ? want.current : el.scrollLeft, i = Math.round(pos / unit);
+      const pos = month ? el.scrollTop : getLeft(el), i = Math.round(pos / unit);
       if (month) { const mid = firstOfMonth(addDays(from, (i + 2) * 7 + 3)); if (mid !== focus) setFocus(mid); }
       else { const f = addDays(from, i); if (f !== focus) setFocus(f); }
       clearTimeout(idle.current); idle.current = setTimeout(edge, 200);
@@ -171,7 +173,7 @@ export default function CalendarView() {
   function edge() {
     const el = sc.current, L = live.current; if (!el || !L.unit) return;
     if (busy() || touch.current || pending.current) { idle.current = setTimeout(edge, 200); return; }
-    const pos = L.month ? el.scrollTop : L.guard && want.current != null ? want.current : el.scrollLeft, i = Math.round(pos / L.unit);
+    const pos = L.month ? el.scrollTop : L.getLeft(el), i = Math.round(pos / L.unit);
     const max = L.month ? MWIN - 5 : WIN - L.n, sh = L.month ? MSHIFT : SHIFT, stepDays = L.month ? sh * 7 : sh;
     if (i < 4) { pending.current = { keep: pos + sh * L.unit }; setFrom(addDays(L.from, -stepDays)); }
     else if (i > max - 4) { pending.current = { keep: pos - sh * L.unit }; setFrom(addDays(L.from, stepDays)); }
@@ -324,7 +326,7 @@ export default function CalendarView() {
         ${rowH > 0 && Array.from({ length: MWIN }, (_, w) => html`<${MonthRow} key=${addDays(from, w * 7)} w0=${addDays(from, w * 7)} plan=${plan} focusM=${new Date(focus).getMonth()} openDay=${openDay} mobile=${mobile} collapse=${collapse}/>`)}
       </div>` : html`
       <div class="cscroll" ref=${sc} onScroll=${onScroll} key=${'d' + n}>
-        ${cw > 0 && html`<div class="ctrack" style=${{ width: GUT + span * cw + 'px' }}>
+        ${cw > 0 && html`<div class="ctrack" ref=${track} style=${{ width: GUT + span * cw + 'px' }}>
           <div class="ctop">
             <div class="crow chead"><div class="corner wk">W${wk}</div>${days.map(d => { const m = plan ? plan.blocks.filter(b => b.s >= d && b.s < addDays(d, 1)).reduce((a, b) => a + (b.e - b.s) / 60000, 0) : 0;
               return html`<div class=${'dh' + (d === t0 ? ' today' : '')} key=${d}>${DN[new Date(d).getDay()]} <b>${new Date(d).getDate()}</b><div class="stat">${m ? dh(m) : ''}</div></div>`; })}</div>
