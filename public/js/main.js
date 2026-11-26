@@ -148,14 +148,17 @@ function Pull() {
   const ind = useRef();
   useEffect(() => {
     const main = ind.current.parentElement, el = () => main.querySelector('.content'), MAX = 70;
-    let y0 = null, d = 0, busy = false;
+    let y0 = null, x0 = 0, d = 0, busy = false;
     const show = v => { const n = ind.current; n.style.top = el().offsetTop + 'px'; n.style.opacity = Math.min(1, v / MAX); n.style.transform = `translate(-50%, ${Math.min(v, MAX) - 34}px)`; n.firstChild.style.transform = busy ? '' : `rotate(${v * 5}deg)`; };
-    const scrollerOf = t => t.closest('.calbody, .now>section, .ol>section') || el();
+    // the calendar itself doesn't move (no rubber band there): only the spinner comes down
+    const scrollerOf = t => t.closest('.cscroll, .mscroll, .calbody, .now>section, .ol>section') || el();
     const start = e => {
-      if (busy || e.touches.length !== 1 || e.target.closest('.ev, .modalbg, .side, .tabbar, .cal, input, textarea, select')) { y0 = null; return; }   // not in the calendar: its top stays put
-      y0 = scrollerOf(e.target).scrollTop <= 0 ? e.touches[0].clientY : null; d = 0;
+      if (busy || e.touches.length !== 1 || e.target.closest('.ev, .modalbg, .side, .tabbar, input, textarea, select')) { y0 = null; return; }
+      y0 = scrollerOf(e.target).scrollTop <= 0 ? e.touches[0].clientY : null; x0 = e.touches[0].clientX; d = 0;
     };
-    const move = e => { if (y0 == null) return; d = e.touches[0].clientY - y0; if (d <= 0 || scrollerOf(e.target).scrollTop > 0) { if (d < 0) y0 = null; show(0); return; } show(d * .5); };
+    const move = e => { if (y0 == null) return; d = e.touches[0].clientY - y0;
+      if (Math.abs(e.touches[0].clientX - x0) > Math.max(12, d)) { y0 = null; show(0); return; }   /* a sideways swipe, not a pull */
+      if (d <= 0 || scrollerOf(e.target).scrollTop > 0) { if (d < 0) y0 = null; show(0); return; } show(d * .5); };
     const end = async () => {
       if (y0 == null) return; y0 = null;
       if (d * .5 < MAX) return show(0);

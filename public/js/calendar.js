@@ -143,10 +143,12 @@ export default function CalendarView() {
       touch.current = null;
       if (g.axis !== 'x' || !cw) { if (g.caught || g.axis !== 'y') settle(); return; }   // never left between two days
       const q = g.pts, [x1, t1] = q[q.length - 1], [x0, t0] = q[0], v = t1 > t0 ? (x1 - x0) / (t1 - t0) : 0;   // px per ms, + = finger to the right
-      // a quick swipe turns exactly one day; a slower drag, where the days follow the finger, ends on the day that
-      // shows the most
+      // a quick swipe: in day view exactly one day, with several days on screen as far as its speed carries, one to
+      // n days (one page at most); a slower drag, where the days follow the finger, ends on the day that shows the most
       const i0 = Math.round(g.sl / cw), pos = getLeft(el), quick = t1 - g.t0 < 300 && Math.abs(v) > 0.2 && Math.abs(pos - g.sl) > 10;
-      let i = quick ? i0 + (pos > g.sl ? 1 : -1) : Math.round(pos / cw);
+      let i = Math.round(pos / cw);
+      if (quick) { const dir = pos > g.sl ? 1 : -1, far = Math.round(Math.abs(pos - v * 180 - g.sl) / cw);
+        i = i0 + dir * Math.max(1, Math.min(n, far)); }
       i = Math.max(0, Math.min(span - n, i));
       slide(i * cw, v);
     };
