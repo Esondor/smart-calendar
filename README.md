@@ -60,6 +60,10 @@ Projects can be boards, shared household lists where chores take turns, or outli
 
 <img src="docs/outline.png" alt="Outline project: categories with progress, sections with items and checklists, the running task with its timer" width="820">
 
+## Claude
+
+Manage Smart Calendar from a chat with Claude (MCP). Describe a project and Claude creates it with its chapters, sections, tasks and estimates. Or attach a document, such as the current draft of a thesis, and Claude brings the outline in line with it: new sections, merged chapters, finished parts ticked off, estimates and deadlines adjusted. Claude lists every change first and applies them only after you agree, and the planner reschedules right away. The last batch can be undone. Each user turns it on for their own account and connects their own Claude account. Setup: [Claude](#claude-1).
+
 ## Vikunja
 
 Vikunja projects are synced through its API, only with the tasks assigned to you, and you choose per project whether they are synced and planned. Start moves a task to Doing in Vikunja's kanban and Done to Done. Files in a "Documents" bucket open in a side panel. A Vikunja behind an Authelia login works too.
@@ -94,6 +98,7 @@ The [Home Assistant integration](https://github.com/Esondor/ha-smart-calendar) (
 - **Live sync.** Google and Vikunja push every change to the server (Google push channels, Vikunja webhooks), which plans and updates every open app within seconds. Both are set up by the server itself; they need its public https address. Polling stays only as a fallback (Google: this week every 5 min, later hourly; Vikunja: every 15 min). Without push: Google every minute / 15 min, Vikunja every minute. ICS (Exchange) can't push: every 2 min, downloaded only when the feed changed. Settings → Calendars shows **Live** for pushed accounts.
 - **Web app (PWA)** with push notifications. On iPhone: Safari → Share → *Add to Home Screen*, then turn on notifications in Settings.
 - **Notifications by push, e-mail or both.** Settings → Notifications lists every notification the app sends: task starts (with Start / Later buttons), event starts, deadlines, the daily summary, clashes, shared projects, follow-ups ready, and connection problems. Each one is set to Off, Push, E-mail or Both. Push is the default; clashes go by push and e-mail. E-mail needs the admin's SMTP setup (Administration → Server → E-mail) and your address; until then everything goes by push.
+- **Claude (MCP).** Create and change projects from a Claude chat: Claude reads your projects, outlines and schedule, proposes changes as a list, and applies them after you agree. Off until each user turns it on for themselves.
 - **Home Assistant.** Chores panel, sensors (next task, open tasks, waiting) and an event service, through the [Smart Calendar integration for HACS](https://github.com/Esondor/ha-smart-calendar).
 - **Multi-user.** Each user connects their own calendars and Vikunja.
 
