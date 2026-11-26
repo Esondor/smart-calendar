@@ -1014,3 +1014,6 @@ aside.files .fic{flex:none;min-width:30px;font-size:9px;font-weight:700;letter-s
 .filepv img,.filepv video{max-width:100%;max-height:72vh;display:block}
 .filepv audio{width:100%;margin:20px}
 .filepv a.btn{font-size:14px;font-weight:500;background:var(--fill2);color:var(--acc);border-radius:8px;padding:6px 12px;text-decoration:none}
+/* setup: install steps */
+ol.how{margin:0;padding-left:20px;line-height:1.5;font-size:15px}
+ol.how li{margin:2px 0}

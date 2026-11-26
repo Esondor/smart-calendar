@@ -15,6 +15,9 @@ import { FilesButton } from './files.js';
 import { passkeysSupported, getPasskey } from './passkey.js';
 
 document.documentElement.dataset.theme = 'dark';   // dark only for now (wall display, consistency)
+// Chrome (Android, desktop) offers installing the web app: kept for the Install button in the setup assistant
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); window.installPrompt = e; dispatchEvent(new Event('installable')); });
+addEventListener('appinstalled', () => { window.installPrompt = null; dispatchEvent(new Event('installable')); });
 if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 // create an account with an invite (link or code) or the registration password
