@@ -600,7 +600,8 @@ body,body.wall{background:transparent}
   .top{position:relative;flex:none;z-index:20}
   .content{flex:1;min-height:0;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;
     padding-bottom:calc(86px + env(safe-area-inset-bottom))}
-  .content.fixed{overflow:hidden;padding-bottom:calc(80px + env(safe-area-inset-bottom))}
+  /* calendar: the same 8px to the tab bar as to the sides (tab bar: 62px high, max(8px, inset - 12px) from the bottom) */
+  .content.fixed{overflow:hidden;padding-bottom:calc(max(8px, env(safe-area-inset-bottom) - 12px) + 62px + 8px)}
   .content.fixed>.cal{margin:0 8px}
 }
 /* pull to refresh */
