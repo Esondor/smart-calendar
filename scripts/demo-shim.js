@@ -39,12 +39,19 @@
     }
     if ((m = p.match(/^\/api\/tasks\/(\d+)\/done$/))) {
       const t = taskOf(m[1]); if (!t) return {};
-      if (body.done === false) { t.status = 'todo'; plan().blocks.push(...(gone.get(t.id) || [])); gone.delete(t.id); plan().done = plan().done.filter(x => x.id !== t.id); }
-      else { t.status = 'done'; t.done_at = Date.now(); drop(t.id); plan().done.push({ id: t.id, title: t.title, at: Date.now(), color: (D('/api/projects').find(x => x.id === t.project_id) || {}).color }); }
+      if (body.done === false) {   // undo: back where it was
+        t.status = 'todo'; const g = gone.get(t.id) || {}; plan().blocks.push(...(g.blocks || [])); plan().nextKeys.unshift(...(g.keys || [])); gone.delete(t.id);
+        plan().done = plan().done.filter(x => x.id !== t.id);
+      } else {
+        if (plan().active?.task_id === t.id) stop(true);   // done while it runs: the session ends with it
+        t.status = 'done'; t.done_at = Date.now(); drop(t.id);
+        plan().done.push({ id: t.id, title: t.title, at: Date.now(), color: projOf(t).color });
+      }
       return t;
     }
-    if (p === '/api/timer/start') { const t = taskOf(body.task); plan().active = t ? { task_id: t.id, period: body.period || 0, since: Date.now(), title: t.title } : null; return { ok: true }; }
-    if (p === '/api/timer/stop') { const a = plan().active; plan().active = null; return { minutes: a ? Math.round((Date.now() - a.since) / 60000) : 0 }; }
+    if (p === '/api/timer/start') { stop(false); const t = taskOf(body.task); if (t) { plan().active = { task_id: t.id, period: body.period || 0, since: Date.now(), title: t.title, mode: body.mode || null, note: body.note || null }; if (t.status === 'todo') t.status = 'doing'; } return { ok: true }; }
+    if (p === '/api/timer/stop') return { minutes: stop(false) };
+    if (p === '/api/timer/more') { for (const u of unitsOf(+body.task)) u.duration = (u.duration || 0) + (+body.minutes || 30); const t = taskOf(body.task); if (t) t.duration = (t.duration || 0) + (+body.minutes || 30); return { ok: true }; }
     if (p === '/api/projects' && method === 'POST') { const x = { id: ++nextId, color: '#1971c2', kind: 'board', columns: ['To do', 'In progress', 'Done'], meta: {}, archived: false, members: [{ id: D('/api/bootstrap').me.id, name: D('/api/bootstrap').me.name, role: 'owner' }], owner_id: D('/api/bootstrap').me.id, ...body }; D('/api/projects').push(x); return x; }
     if ((m = p.match(/^\/api\/projects\/(\d+)$/)) && method === 'PATCH') { const x = D('/api/projects').find(y => y.id === +m[1]); return x ? Object.assign(x, body) : {}; }
     if (p === '/api/clashes' && method === 'POST') {   // your choice wins over the automatic one; dismissed ones go
@@ -55,7 +62,22 @@
     note();
     return { ok: true };
   }
-  function drop(id) { const keep = [], out = []; for (const b of plan().blocks) (plan().units[b.key]?.taskId === id ? out : keep).push(b); plan().blocks = keep; if (out.length) gone.set(id, out); }
+  // a task leaves the plan (done): its blocks and its place in "next" are kept for undo
+  function drop(id) {
+    const keep = [], out = []; for (const b of plan().blocks) (plan().units[b.key]?.taskId === id ? out : keep).push(b); plan().blocks = keep;
+    const keys = plan().nextKeys.filter(k => plan().nextUnits[k]?.taskId === id); plan().nextKeys = plan().nextKeys.filter(k => !keys.includes(k));
+    gone.set(id, { blocks: out, keys });
+  }
+  const projOf = t => D('/api/projects').find(x => x.id === t.project_id) || {};
+  const unitsOf = id => [...Object.values(plan().units || {}), ...Object.values(plan().nextUnits || {})].filter(u => u.taskId === id);
+  // the running timer stops: its minutes count for the task and the session stays in the calendar
+  function stop(done) {
+    const a = plan().active; if (!a) return 0;
+    const end = Date.now(), min = Math.round((end - a.since) / 60000), t = taskOf(a.task_id) || {};
+    for (const u of unitsOf(a.task_id)) u.spent = (u.spent || 0) + min;
+    if (end - a.since >= 60000) plan().log.push({ task_id: a.task_id, start: a.since, end, title: a.title, color: projOf(t).color, p_name: projOf(t).name, kind: a.mode === 'r' ? 'research' : 'work', done: done ? 1 : 0 });
+    plan().active = null; return min;
+  }
   function read(p, q) {
     if (p === '/api/plan') return plan();
     if (p === '/api/activity') return D('/api/activity?project=' + q.get('project')) || [];
