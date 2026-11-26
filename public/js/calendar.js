@@ -87,8 +87,8 @@ export default function CalendarView() {
     el.scrollTo({ [month ? 'top' : 'left']: i * unit, behavior: 'auto' });
     if (!month && p.now !== false) el.scrollTop = Math.max(0, (new Date().getHours() - H0 - 1.5) * hh);
   });
-  // phone, like a calendar app: the days follow the finger sideways and settle on a whole day when let go (a flick
-  // turns the page, in day view one day at a time); up and down scrolls the hours; two fingers zoom.
+  // phone, like a calendar app: the days follow the finger sideways and settle on the day that shows the most when
+  // let go; a quick flick turns one day; up and down scrolls the hours; two fingers zoom.
   // The direction is fixed by the first few points of movement, so a scroll never turns into a page turn halfway.
   useEffect(() => {
     const el = sc.current; if (!el || month || !mobile) return;
@@ -100,7 +100,7 @@ export default function CalendarView() {
       if (e.touches.length !== 1) return;
       const caught = !!anim.current; anim.current = null;   // a finger stops a slide where it is
       touch.current = e.target.closest('.ev.sel, .ev.drag') ? null   // a selected block is being moved, not the days
-        : { x: e.touches[0].clientX, y: e.touches[0].clientY, sl: el.scrollLeft, st: el.scrollTop, axis: null, caught, pts: [[e.touches[0].clientX, e.timeStamp]] };
+        : { x: e.touches[0].clientX, y: e.touches[0].clientY, sl: el.scrollLeft, st: el.scrollTop, axis: null, caught, t0: e.timeStamp, pts: [[e.touches[0].clientX, e.timeStamp]] };
     };
     const move = e => {
       const g = touch.current; if (!g) return;
@@ -128,10 +128,10 @@ export default function CalendarView() {
       touch.current = null;
       if (g.axis !== 'x' || !cw) { if (g.caught || g.axis !== 'y') settle(); return; }   // never left between two days
       const q = g.pts, [x1, t1] = q[q.length - 1], [x0, t0] = q[0], v = t1 > t0 ? (x1 - x0) / (t1 - t0) : 0;   // px per ms, + = finger to the right
-      const i0 = Math.round(g.sl / cw), pos = el.scrollLeft;
-      let i;
-      if (n === 1) { const moved = (g.sl - pos) / cw; i = i0 + (Math.abs(v) > 0.3 ? (v < 0 ? 1 : -1) : moved < -0.35 ? 1 : moved > 0.35 ? -1 : 0); i = Math.max(i0 - 1, Math.min(i0 + 1, i)); }
-      else i = Math.round((pos - v * 220) / cw);
+      // a quick swipe turns exactly one day; a slower drag, where the days follow the finger, ends on the day that
+      // shows the most
+      const i0 = Math.round(g.sl / cw), pos = el.scrollLeft, quick = t1 - g.t0 < 300 && Math.abs(v) > 0.2 && Math.abs(pos - g.sl) > 10;
+      let i = quick ? i0 + (pos > g.sl ? 1 : -1) : Math.round(pos / cw);
       i = Math.max(0, Math.min(span - n, i));
       slide(i * cw);
     };
