@@ -1,0 +1,32 @@
+# Portainer: Stacks → Add stack → Repository → this repo, compose path "docker-compose.yml".
+# Create the folder docker/smart-calendar in DSM File Station first (= /volume1/docker/smart-calendar).
+# The app keeps its data in …/data and its backups in …/backups (folder, days and time: Administration → Overview).
+# No settings needed here: the admin sets up the public address and Google sign-in inside the app
+# (Settings → Server); every user connects their own calendars in the app's setup assistant.
+services:
+  smart-calendar:
+    build: .
+    image: smart-calendar:latest
+    pull_policy: build              # always build from this repo, never pull from Docker Hub
+    container_name: smart-calendar
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      DATA_DIR: /store/data
+      STORE_HOST: ${APP_PATH:-/volume1/docker/smart-calendar}   # only to show NAS paths in the app
+      # optional overrides of the in-app server settings:
+      BASE_URL: ${BASE_URL:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    volumes:
+      # the app's folder: data/ (database, encryption key, push keys – back it up with Hyper Backup) and backups/
+      - ${APP_PATH:-/volume1/docker/smart-calendar}:/store
+      # backups somewhere else on the NAS: mount that folder at the same path, then enter the path in Administration
+      # - /volume1/backup/smart-calendar:/volume1/backup/smart-calendar
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8097}:8080"   # only the reverse proxy on the NAS reaches it; drop "127.0.0.1:" for plain LAN access
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]   # only for the start script: take over the data folder, then drop to the "node" user

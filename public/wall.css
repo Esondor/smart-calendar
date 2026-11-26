@@ -1,0 +1,92 @@
+/* Wall display (Fire HD, kiosk, Home Assistant): big, calm, touch-first */
+body.wall{overflow:hidden;font-size:19px}
+.w{display:flex;flex-direction:column;height:100vh;height:100dvh;padding:22px 28px 18px;gap:18px}
+.w-top{display:flex;align-items:center;gap:24px}
+.w-clock{font-size:64px;font-weight:300;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+.w-date{font-size:19px;color:var(--muted);margin-top:4px}
+.w-people{margin-left:auto;display:flex;gap:8px;border-radius:40px;padding:5px}
+.w-people button{display:flex;align-items:center;gap:10px;background:none;color:var(--ink);font-size:20px;font-weight:600;padding:6px 22px 6px 6px;border-radius:32px;min-height:56px;box-shadow:none}
+.w-people .avatar{width:44px;height:44px;font-size:16px}
+.w-main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:22px}
+.w-col{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:14px;padding-bottom:10px;scrollbar-width:none;overscroll-behavior:contain}
+.w-col::-webkit-scrollbar{display:none}
+/* the task in focus */
+.w-hero{background:var(--row);border-radius:26px;padding:26px 28px 24px;position:relative}
+.w-hero.live{box-shadow:inset 0 0 0 2px var(--now)}
+.w-hero .lab{font-size:16px;font-weight:700;color:var(--acc);text-transform:uppercase;letter-spacing:.05em}
+.w-hero.live .lab{color:var(--now)}
+.w-hero .t{font-size:42px;font-weight:700;letter-spacing:-.02em;line-height:1.12;margin:10px 0 8px}
+.w-hero .m{font-size:20px;color:var(--muted)}
+.w-hero .acts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:24px}
+.w-hero .acts button{font-size:22px;font-weight:600;min-height:84px;border-radius:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:var(--glass);color:var(--ink);box-shadow:inset 0 1px 0 var(--glass-edge)}
+.w-hero .acts button.go{background:var(--acc);color:#0b2a26}
+.w-hero .acts button.ok{background:var(--done);color:#0e2a10}
+.w-hero.idle .t{font-size:46px}
+.w-back{margin-top:14px;background:none;border:0;box-shadow:none;color:var(--acc);font-size:18px;padding:8px 0;min-height:44px}
+.w-timer{display:flex;align-items:center;gap:16px;margin:6px 0 0}
+.w-timer span{font-size:46px;font-weight:300;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.w-timer .bar{flex:1;height:10px;border-radius:5px;background:rgba(255,255,255,.12);overflow:hidden}.w-timer .bar i{display:block;height:100%;background:var(--now)}
+.w-timer em{font-style:normal;color:var(--muted);font-size:18px}
+/* overview by place */
+.w-sec{font-size:16px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:6px 6px 0;display:flex;align-items:center;gap:8px}
+.w-sec .ic{color:var(--acc)}
+.w-sec em{font-style:normal;margin-left:auto;font-weight:500}
+.w-list{background:var(--row);border-radius:22px;overflow:hidden;flex:none}
+.w-row{display:flex;align-items:center;gap:16px;padding:14px 20px;position:relative;min-height:72px;cursor:pointer}
+.w-row+.w-row::before{content:"";position:absolute;top:0;left:72px;right:0;border-top:1px solid var(--row-line,var(--line))}
+.w-row.sel{background:color-mix(in srgb,var(--acc) 18%,transparent)}
+.w-row .chk{width:38px;height:38px;min-width:38px;min-height:38px;border-radius:50%;border:2.5px solid var(--faint,rgba(255,255,255,.4));background:none;padding:0;flex:none;box-shadow:none}
+.w-row .chk:active{background:var(--done);border-color:var(--done)}
+.w-row .tt{flex:1;min-width:0}
+.w-row .tt b{display:block;font-weight:600;font-size:21px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.w-row .tt span{font-size:16px;color:var(--muted)}
+.w-row .tm{font-size:19px;color:var(--muted);font-variant-numeric:tabular-nums;flex:none}
+.w-row.run .tm{color:var(--now)}
+.w-row.late .tm{color:var(--late)}
+.w-row button.side{font-size:18px;padding:12px 20px;border-radius:14px;min-height:52px}
+.w-row.waiting .chk{border-style:dashed}
+.w-done{display:flex;gap:8px;flex-wrap:wrap}
+.w-done span{font-size:16px;color:var(--muted);background:var(--row);border-radius:20px;padding:8px 14px;display:inline-flex;gap:6px;align-items:center}
+.w-done .ic{color:var(--done)}
+.w-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--muted);height:100%;font-size:24px}
+.w-empty .ic{color:var(--done)}
+.w-off{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);font-size:15px;color:var(--muted)}
+/* portrait / small: one column, overview below */
+@media (max-width:900px),(orientation:portrait){
+  .w{padding:18px;overflow:auto;height:auto;min-height:100vh}body.wall{overflow:auto}
+  .w-main{grid-template-columns:1fr}.w-col{overflow:visible}
+  .w-clock{font-size:48px}.w-top{flex-wrap:wrap}.w-people{margin-left:0}
+  .w-hero .t{font-size:34px}
+}
+.w-line .w-row{min-height:60px;padding:10px 20px}
+.w-line .w-row .tm{width:64px;text-align:left}
+.w-line .w-row+.w-row::before{left:20px}
+.w-line .w-row.now{box-shadow:inset 4px 0 0 var(--now)}
+/* add a chore, assign */
+.w-plus{width:60px;height:60px;min-width:60px;border-radius:50%;display:grid;place-items:center;padding:0;background:var(--glass);color:var(--ink);margin-left:auto;box-shadow:inset 0 1px 0 var(--glass-edge)}
+.w-plus+.w-people{margin-left:0}
+.w-for{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.w-for button,.w-seg button{display:inline-flex;align-items:center;gap:8px;min-height:52px;padding:6px 18px 6px 8px;border-radius:28px;font-size:18px;font-weight:600;background:var(--glass);color:var(--ink);box-shadow:none}
+.w-for button.on,.w-seg button.on{background:color-mix(in srgb,var(--acc) 30%,transparent);color:var(--ink);opacity:1}
+.w-for .avatar,.w-seg .avatar{width:36px;height:36px;font-size:14px}
+.w-seg{display:flex;gap:8px;flex-wrap:wrap}.w-seg button{padding:6px 20px}.w-seg button:has(.avatar){padding-left:8px}
+.w-sheetbg{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px}
+.w-sheet{width:100%;max-width:640px;background:var(--glass-strong,#2a2a30);border-radius:28px;padding:22px 24px;display:flex;flex-direction:column;gap:10px;-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);max-height:100%;overflow:auto}
+.w-sheet-h{display:flex;align-items:center;justify-content:space-between;font-size:24px}
+.w-x{width:48px;height:48px;min-width:48px;border-radius:50%;display:grid;place-items:center;padding:0;background:rgba(255,255,255,.12);box-shadow:none}
+.w-in{font-size:24px;padding:14px 16px;border-radius:16px;width:100%}
+.w-lab{font-size:15px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:6px}
+.w-add{margin-top:10px;min-height:64px;border-radius:20px;font-size:22px;font-weight:700;background:var(--acc);color:#0b2a26}
+.w-err{color:var(--late)}
+/* phone: chores at a glance */
+@media (max-width:600px){
+  .w{padding:14px 14px calc(14px + env(safe-area-inset-bottom));gap:12px}
+  .w-clock{font-size:38px}.w-date{font-size:15px}
+  .w-top{gap:10px;flex-wrap:nowrap}
+  .w-plus{width:52px;height:52px;min-width:52px}
+  .w-people{padding:3px;gap:4px}.w-people button{font-size:0;gap:0;padding:4px;min-height:48px}.w-people .avatar{width:40px;height:40px}
+  .w-hero{padding:18px}.w-hero .t{font-size:28px}.w-hero .acts{gap:8px}.w-hero .acts button{min-height:68px;font-size:17px}
+  .w-row{min-height:60px;padding:10px 14px}.w-row .tt b{font-size:18px}
+  .w-line{display:none}.w-line+*{}
+  .w-sec:has(+ .w-line){display:none}
+}

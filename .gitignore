@@ -1,0 +1,8 @@
+node_modules/
+data/
+backups/
+import/
+.env
+*.db*
+.DS_Store
+demo-site/

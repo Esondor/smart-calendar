@@ -1,0 +1,7 @@
+// Cloudflare: the demo website (npm run demo → demo-site/) served as static files, no code runs there.
+// "name" must be the Worker's name in the Cloudflare dashboard.
+{
+  "name": "smart-calendar",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "./demo-site" }
+}

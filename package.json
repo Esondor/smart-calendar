@@ -1,0 +1,31 @@
+{
+  "name": "smart-calendar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted auto-scheduling planner: tasks, chores, projects and calendars (Google, ICS/Exchange, Vikunja).",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "demo": "node --disable-warning=ExperimentalWarning scripts/demo.mjs"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/helmet": "^13.2.0",
+    "@fastify/rate-limit": "^11.3.0",
+    "@fastify/static": "^10.1.12",
+    "@simplewebauthn/server": "^13.3.3",
+    "fastify": "^5.12.8",
+    "htm": "^3.1.1",
+    "node-ical": "^0.27.6",
+    "nodemailer": "10.3.1",
+    "preact": "^11.2.0",
+    "qrcode": "^1.5.4",
+    "web-push": "^4.0.0"
+  },
+  "license": "PolyForm-Noncommercial-1.0.0"
+}
