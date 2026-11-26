@@ -154,3 +154,29 @@ test('guide and new ids for set_order', async () => {
   const o = await tool('set_order', { project_id: pid, phases: [{ name: 'First', units: [r.ids.s91] }, { name: 'Rest', units: units.filter(x => x !== r.ids.s91) }] });
   assert.equal(o.order[0].units[0].title, 'Next steps');
 });
+
+test('numbers on every level: problems are reported, renumber fixes them', async () => {
+  const p0 = await tool('get_project', { project_id: pid });
+  const intro = p0.tree.find(x => x.title === 'Introduction');
+  // a section numbered for another chapter, an item without a number next to numbered ones
+  const r = await tool('apply_changes', { project_id: pid, dry_run: false, changes: [
+    { op: 'update', id: it2, number: '1.1.2' }, { op: 'update', id: it1, number: '1.1.1' },
+    { op: 'add', ref: 's', parent: intro.id, title: 'Scope', number: '3.1' },
+    { op: 'add', parent: 's', title: 'Limits', duration_min: 45 },
+  ] });
+  assert.ok(r.numbering_problems.some(x => /3\.1 “Scope”.*chapter 1/.test(x)), r.numbering_problems.join('\n'));
+  const f = await tool('apply_changes', { project_id: pid, dry_run: false, changes: [{ op: 'renumber' }] });
+  assert.equal(f.numbering_problems, undefined);
+  const p = await tool('get_project', { project_id: pid });
+  const sec = p.tree.find(x => x.id === intro.id).children.find(x => x.title === 'Scope');
+  assert.equal(sec.number, '1.2'); assert.equal(sec.children[0].number, '1.2.1');
+  assert.equal(p.tree.find(x => x.id === intro.id).children[0].children[0].number, '1.1.1', 'item numbers are shown');
+});
+
+test('planning notes and the order back to the outline', async () => {
+  await tool('update_project', { project_id: pid, planning_notes: 'revise 900 words/h' });
+  assert.equal((await tool('get_project', { project_id: pid })).project.planning_notes, 'revise 900 words/h');
+  const o = await tool('set_order', { project_id: pid, follow_outline: true });
+  assert.match(o.order[0].phase, /^1 /);
+  assert.equal(o.order[0].units[0].title, 'Motivation');
+});

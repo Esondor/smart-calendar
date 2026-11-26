@@ -47,7 +47,7 @@ function listProjects(uid) {
 function nodeOut(t, kind, info, kids) {
   const m = t.meta || {}, level = kind === 'outline' ? lvl(t) : null, ch = kids.get(t.id) || [];
   const o = { id: t.id, ...(level ? { level } : {}) };
-  const num = level === 'chapter' ? m.num : level === 'section' ? m.sid : null;
+  const num = level === 'chapter' ? m.num : level === 'section' ? m.sid : level === 'item' ? m.n : null;
   if (num) o.number = num;
   o.title = t.title; o.status = t.status;
   if (level === 'chapter') Object.assign(o, clean({ short: m.short, summary: m.thread, purpose: m.role, leads_to: m.out }));
@@ -70,7 +70,7 @@ function getProject(uid, pid, includeDone = true) {
   const ids = new Set(rows.map(t => t.id)), kids = new Map();
   for (const t of rows) { const k = t.parent_id && ids.has(t.parent_id) ? t.parent_id : 0; if (!kids.has(k)) kids.set(k, []); kids.get(k).push(t); }
   const end = Math.max(0, ...rows.filter(t => t.status !== 'done').map(t => info.get(t.id)?.end || 0));
-  return { project: clean({ id: p.id, name: p.name, kind: p.kind, target_date: p.target_date, levels: p.kind === 'outline' ? (p.meta.levels || ['Chapter', 'Section']) : null, planned_finish: fmt(end) }),
+  return { project: clean({ id: p.id, name: p.name, kind: p.kind, target_date: p.target_date, levels: p.kind === 'outline' ? (p.meta.levels || ['Chapter', 'Section']) : null, planned_finish: fmt(end), planning_notes: p.meta.planning || null }),
     tree: (kids.get(0) || []).map(t => nodeOut(t, p.kind, info, kids)),
     ...(isOrdered(p.meta, p.kind) ? { order: orderOut(p) } : {}) };
 }
@@ -81,8 +81,14 @@ function orderOut(p) {
 }
 function setOrder(uid, a) {
   const p = needProject(uid, a.project_id);
-  if (!Array.isArray(a.phases) || !a.phases.length) fail('phases is empty');
-  const r = saveOrder(p.id, { phases: a.phases.map(ph => ({ name: ph?.name, units: Array.isArray(ph?.units) ? ph.units : [] })) });
+  let phases = a.phases;
+  if (a.follow_outline) {   // one phase per chapter, everything in outline order
+    const chs = all('SELECT * FROM tasks WHERE project_id = ? AND parent_id IS NULL ORDER BY sort, id', p.id).map(taskRow);
+    phases = chs.map(ch => ({ name: (ch.meta.num && ch.meta.num !== '+' ? ch.meta.num + ' ' : '') + (ch.meta.short || ch.title),
+      units: kidsOf(ch.id).length ? kidsOf(ch.id).map(x => x.id) : [ch.id] }));
+  }
+  if (!Array.isArray(phases) || !phases.length) fail('phases is empty (or set follow_outline: true)');
+  const r = saveOrder(p.id, { phases: phases.map(ph => ({ name: ph?.name, units: Array.isArray(ph?.units) ? ph.units : [] })) });
   logActivity(p.id, uid, 'Claude: changed the order'); A.touchProject(p.id);
   return { saved: true, order: orderOut(needProject(uid, p.id)), phases: r.phases.length };
 }
@@ -107,7 +113,7 @@ function fieldsOf(c, level, meta0) {
   if ('planned' in c) set.auto = c.planned ? 1 : 0;
   if ('status' in c) { if (!['todo', 'doing'].includes(c.status)) fail('status is todo or doing (use the done change to finish a task)'); set.status = c.status; }
   if ('checklist' in c) set.points = JSON.stringify((Array.isArray(c.checklist) ? c.checklist : []).slice(0, 200).map(x => typeof x === 'string' ? { t: str(x, 500), done: false } : { t: str(x?.text, 500), done: !!x?.done }));
-  if ('number' in c) { if (level === 'chapter') meta.num = str(c.number, 12); else if (level === 'section') meta.sid = str(c.number, 12); }
+  if ('number' in c) { const v = str(c.number ?? '', 16).trim(); if (level === 'chapter') meta.num = v; else if (level === 'section') meta.sid = v; else if (level === 'item') meta.n = v; }
   const M = { short: ['short', 40], summary: ['thread', 300], purpose: ['role', 2000], leads_to: ['out', 2000], note: ['warn', 500] };
   for (const [k, [mk, n]] of Object.entries(M)) if (k in c) meta[mk] = str(c[k], n);
   if ('key_points' in c) meta.pts = (Array.isArray(c.key_points) ? c.key_points : []).map(x => str(x, 500).trim()).filter(Boolean).slice(0, 50);
@@ -182,19 +188,66 @@ export function applyChanges(uid, pid, changes, dry) {
           if (all_.some(x => x.ext_source)) fail(`${q(t.title)} comes from Vikunja; change it there`);
           run('DELETE FROM tasks WHERE id = ?', t.id);
           lines.push(`Delete ${q(t.title)}${all_.length > 1 ? ` with ${all_.length - 1} inside` : ''}`);
-        } else fail('op is add, update, move, done or delete');
+        } else if (c.op === 'renumber') {
+          if (!outline) fail('only outline projects have numbers');
+          const ch = c.id != null ? own(resolve(c.id)) : null;
+          if (ch && lvl(ch) !== 'chapter') fail('renumber takes a chapter id, or no id for the whole project');
+          const n0 = renumber(p.id, ch?.id ?? null);
+          lines.push(`Renumber ${ch ? q(ch.title) : 'all chapters'}: ${n0} number${n0 === 1 ? '' : 's'} changed`);
+        } else fail('op is add, update, move, done, delete or renumber');
       } catch (e) { e.message = `Change ${n + 1}${c?.op ? ` (${c.op})` : ''}: ${e.message}`; throw e; }
     });
     // the done changes run after the rest, with the app's own logic (parents close, follow-ups, Vikunja)
     for (const d of doneOps) if (!get('SELECT 1 FROM tasks WHERE id = ?', d.id)) fail('A task marked done is deleted in the same batch');
+    var warnings = outline ? numberingProblems(p.id) : [];
     db.exec(dry ? 'ROLLBACK' : 'COMMIT');
   } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
-  if (dry) return { dry_run: true, changes: lines };
+  const warn = warnings.length ? { numbering_problems: warnings.slice(0, 40), fix: 'Set the numbers with update changes, or add {"op":"renumber"} (whole project) or {"op":"renumber","id":<chapter>} to number by outline position.' } : {};
+  if (dry) return { dry_run: true, changes: lines, ...warn };
   kvSet(undoKey(uid, p.id), snapshot);
   for (const d of doneOps) A.setDone(uid, d.id, 0, d.done, 'Claude');
   logActivity(p.id, uid, `Claude: ${lines.length} change${lines.length === 1 ? '' : 's'}`);
   A.touchProject(p.id);
-  return { applied: true, changes: lines, ...(refs.size ? { ids: Object.fromEntries(refs) } : {}) };
+  return { applied: true, changes: lines, ...(refs.size ? { ids: Object.fromEntries(refs) } : {}), ...warn };
+}
+
+// numbers from the outline position: numeric chapters 1, 2, 3 … (counting on from the first one's number),
+// their sections 2.1, 2.2 …, the items in a section 2.1.1, 2.1.2 …; chapters like "A" keep theirs and number below it
+const kidsOf = id => all('SELECT * FROM tasks WHERE parent_id IS ? AND project_id = (SELECT project_id FROM tasks WHERE id = ?) ORDER BY sort, id', id, id).map(taskRow);
+function renumber(pid, chapterId) {
+  let changed = 0;
+  const setNum = (t, key, v) => { if ((t.meta[key] || '') === v) return; run('UPDATE tasks SET meta = ?, updated_at = ? WHERE id = ?', JSON.stringify({ ...t.meta, [key]: v }), Date.now(), t.id); changed++; };
+  const chs = all('SELECT * FROM tasks WHERE project_id = ? AND parent_id IS NULL ORDER BY sort, id', pid).map(taskRow).filter(t => lvl(t) === 'chapter' && t.meta.level === 'chapter');
+  const numeric = chs.filter(c => /^\d+$/.test(c.meta.num || ''));
+  let next = numeric.length ? +numeric[0].meta.num : 1;
+  for (const ch of chs) {
+    let num = ch.meta.num || '';
+    if (/^\d+$/.test(num) || !num) { if (/^\d+$/.test(num)) { num = String(next++); if (!chapterId || ch.id === chapterId) setNum(ch, 'num', num); } }
+    if (chapterId && ch.id !== chapterId) continue;
+    if (!num || num === '+') continue;
+    let si = 0;
+    for (const sec of kidsOf(ch.id)) {
+      if (lvl(sec) !== 'section') continue;
+      const sid = `${num}.${++si}`; setNum(sec, 'sid', sid);
+      let ii = 0;
+      for (const it of kidsOf(sec.id)) setNum(it, 'n', `${sid}.${++ii}`);
+    }
+  }
+  return changed;
+}
+// numbers that do not fit where the task is: a section must start with its chapter's number, an item with its section's; no doubles
+function numberingProblems(pid) {
+  const out = [], rows = all('SELECT * FROM tasks WHERE project_id = ?', pid).map(taskRow), by = new Map(rows.map(t => [t.id, t]));
+  const numOf = t => lvl(t) === 'chapter' ? t.meta.num : lvl(t) === 'section' ? t.meta.sid : t.meta.n;
+  const seen = new Map();
+  for (const t of rows) {
+    const n = numOf(t), par = t.parent_id && by.get(t.parent_id), pn = par && numOf(par);
+    if (lvl(t) === 'section' && !n) out.push(`section “${t.title}” (id ${t.id}) has no number`);
+    if (lvl(t) === 'item' && par && lvl(par) === 'section' && pn && !n && rows.some(x => x.parent_id === par.id && x.meta.n)) out.push(`item “${t.title}” (id ${t.id}) has no number, its siblings do`);
+    if (n && pn && /^[\dA-Z]/.test(pn) && !String(n).startsWith(pn + '.')) out.push(`${lvl(t)} ${n} “${t.title}” (id ${t.id}) is in ${lvl(par)} ${pn} “${par.title}”`);
+    if (n) { const k = (t.parent_id || 0) + ':' + n; if (seen.has(k)) out.push(`${n} is used twice: “${seen.get(k)}” and “${t.title}” (id ${t.id})`); else seen.set(k, t.title); }
+  }
+  return out;
 }
 
 // puts the project's tasks back as they were before Claude's last batch
@@ -222,7 +275,7 @@ export function undoLast(uid, pid) {
 
 function createProject(uid, a) {
   const name = str(a.name, 100).trim() || fail('name is missing'), outline = a.kind !== 'board';
-  const meta = outline ? { levels: Array.isArray(a.levels) && a.levels.length === 2 ? a.levels.map(x => str(x, 30)) : ['Chapter', 'Section'] } : {};
+  const meta = { ...(outline ? { levels: Array.isArray(a.levels) && a.levels.length === 2 ? a.levels.map(x => str(x, 30)) : ['Chapter', 'Section'] } : {}), ...(a.planning_notes ? { planning: str(a.planning_notes, 2000) } : {}) };
   const sort = (get('SELECT MAX(p.sort) AS m FROM projects p JOIN project_members m ON m.project_id = p.id WHERE m.user_id = ?', uid).m || 0) + 1;
   const id = Number(run(`INSERT INTO projects(name, color, kind, owner_id, schedule, target_date, sort, created_at, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     name, /^#[0-9a-f]{6}$/i.test(a.color || '') ? a.color : '#1971c2', outline ? 'outline' : 'board', uid, a.schedule === 'personal' ? 'personal' : 'work', a.target_date ? date(a.target_date) : null, sort, Date.now(), JSON.stringify(meta)).lastInsertRowid);
@@ -235,7 +288,10 @@ function updateProject(uid, a) {
   if ('name' in a) set.name = str(a.name, 100).trim() || fail('name is empty');
   if ('target_date' in a) set.target_date = date(a.target_date);
   if ('schedule' in a) set.schedule = a.schedule === 'personal' ? 'personal' : 'work';
-  if ('levels' in a) { if (!(Array.isArray(a.levels) && a.levels.length === 2)) fail('levels is two names, e.g. ["Chapter", "Section"]'); set.meta = JSON.stringify({ ...p.meta, levels: a.levels.map(x => str(x, 30)) }); }
+  const meta = { ...p.meta };
+  if ('levels' in a) { if (!(Array.isArray(a.levels) && a.levels.length === 2)) fail('levels is two names, e.g. ["Chapter", "Section"]'); meta.levels = a.levels.map(x => str(x, 30)); }
+  if ('planning_notes' in a) meta.planning = str(a.planning_notes, 2000);
+  if (JSON.stringify(meta) !== JSON.stringify(p.meta)) set.meta = JSON.stringify(meta);
   if (!Object.keys(set).length) fail('nothing to change');
   run(`UPDATE projects SET ${Object.keys(set).map(k => k + ' = ?').join(', ')} WHERE id = ?`, ...Object.values(set), p.id);
   A.touchProject(p.id);
@@ -250,7 +306,7 @@ const FIELDS = {
   priority: { type: 'string', enum: PRI }, planned: { type: 'boolean', description: 'true = the planner schedules it; false = kept on the Later list' },
   status: { type: 'string', enum: ['todo', 'doing'] },
   checklist: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, done: { type: 'boolean' } } } },
-  number: { type: 'string', description: 'Outline: chapter number ("3") or section number ("3.2")' },
+  number: { type: 'string', description: 'Outline numbering, exactly as in the document: chapter "3", section "3.2", item (subsection) "3.2.1". Must start with the parent\'s number. Empty string removes it.' },
   short: { type: 'string', description: 'Chapter: short name for lists' }, summary: { type: 'string', description: 'Chapter: one-line summary' },
   purpose: { type: 'string', description: 'Chapter: what it is for' }, leads_to: { type: 'string', description: 'Chapter: bridge to the next chapter' },
   note: { type: 'string', description: 'Section: warning or note shown on it' }, key_points: { type: 'array', items: { type: 'string' }, description: 'Section: key points' },
@@ -267,7 +323,7 @@ const TOOLS = [
     inputSchema: { type: 'object', required: ['project_id', 'changes', 'dry_run'], properties: {
       project_id: { type: 'integer' }, dry_run: { type: 'boolean', description: 'true = only check and describe the changes' },
       changes: { type: 'array', maxItems: 300, items: { type: 'object', required: ['op'], properties: {
-        op: { type: 'string', enum: ['add', 'update', 'move', 'done', 'delete'] }, id,
+        op: { type: 'string', enum: ['add', 'update', 'move', 'done', 'delete', 'renumber'], description: 'renumber: number a chapter (id) or the whole project (no id) by outline position' }, id,
         ref: { type: 'string', description: 'add: a name for the new task, usable as id or parent by later changes in this batch' },
         parent: { ...id, type: ['integer', 'string', 'null'], description: 'add/move: the chapter or section it goes into; null = top level' },
         level: { type: 'string', enum: ['chapter', 'section', 'item'], description: 'add, outline projects: default follows from the parent' },
@@ -276,34 +332,48 @@ const TOOLS = [
   { name: 'undo_last_changes', title: 'Undo the last change', description: 'Puts the project back as it was before the last applied apply_changes batch (within 7 days). Edits made in the app since then are lost.',
     inputSchema: { type: 'object', properties: { project_id: { type: 'integer' } }, required: ['project_id'] }, annotations: { destructiveHint: true } },
   { name: 'set_order', title: 'Set the order', description: 'Set the order the planner works through a project (for a thesis: the writing order), as named phases of units. A unit is a section (its items follow in outline order) or a task outside any section; never a chapter or an item inside a section. Send the complete order: every unit id from get_project "order", rearranged (units left out are put back after their outline neighbour). Phase names say what the step is, e.g. "Ch. 3 results" or "Figures and references". Show the user the proposed order and apply it after they agree. Example: {"project_id":5,"phases":[{"name":"Methods first","units":[41,42]},{"name":"Results","units":[51,52,53]},{"name":"Introduction last","units":[11]}]}',
-    inputSchema: { type: 'object', required: ['project_id', 'phases'], properties: { project_id: { type: 'integer' },
+    inputSchema: { type: 'object', required: ['project_id'], properties: { project_id: { type: 'integer' }, follow_outline: { type: 'boolean', description: 'true = reset the order to the outline: one phase per chapter, sections in outline order (phases is then ignored)' },
       phases: { type: 'array', items: { type: 'object', required: ['units'], properties: { name: { type: 'string' }, units: { type: 'array', items: { type: 'integer' }, description: 'Unit ids in order' } } } } } } },
   { name: 'create_project', title: 'Create a project', description: 'A new empty project; then fill it with one apply_changes batch (chapters, sections and items with refs and estimates) and, if the work should not follow the outline, set_order. kind outline = chapters → sections → items (thesis, book, report, course, anything with parts); board = a plain list of tasks (errands, small projects). target_date is the date it should be finished by.',
     inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, kind: { type: 'string', enum: ['outline', 'board'], description: 'Default outline' },
       target_date: { type: 'string', description: 'YYYY-MM-DD' }, levels: { type: 'array', items: { type: 'string' }, description: 'Outline: names of the two levels, default ["Chapter", "Section"]' },
-      schedule: { type: 'string', enum: ['work', 'personal'], description: 'Which hours it is planned into; default work' } } } },
-  { name: 'update_project', title: 'Change project details', description: 'Rename a project or change its target date, hours or level names.',
+      schedule: { type: 'string', enum: ['work', 'personal'], description: 'Which hours it is planned into; default work' },
+      planning_notes: { type: 'string', description: 'How estimates are made for this project, e.g. the user\'s writing pace' } } } },
+  { name: 'update_project', title: 'Change project details', description: 'Rename a project or change its target date, hours, level names or planning notes.',
     inputSchema: { type: 'object', required: ['project_id'], properties: { project_id: { type: 'integer' }, name: { type: 'string' }, target_date: { type: ['string', 'null'] },
-      schedule: { type: 'string', enum: ['work', 'personal'] }, levels: { type: 'array', items: { type: 'string' } } } } },
+      schedule: { type: 'string', enum: ['work', 'personal'] }, levels: { type: 'array', items: { type: 'string' } },
+      planning_notes: { type: 'string', description: 'How estimates are made for this project (e.g. "revising 900 words/h, new text 350 words/h, figure 45 min"). Shown in get_project; keep it up to date.' } } } },
 ];
 const INSTRUCTIONS = `Smart Calendar is the user's planner: it books their tasks into the free time of their calendar, around appointments and within their work or personal hours, and re-plans after every change.
 
 How it works
-- Projects are "outline" (chapters → sections → items: thesis, book, report, course) or "board" (a list of tasks). Only leaves (items, board tasks) are booked; chapters and sections are containers.
-- A leaf's duration_min is its estimate; the planner books what is left (duration_min − spent_min). planned: false keeps a task off the schedule. A task deadline is hard; the project target_date is the overall goal.
-- Outline projects are worked through in their order (for a thesis: the writing order), which is separate from the outline and its numbering: named phases of units, a unit being a section with all its items or a task outside any section. get_project shows it under "order"; set_order changes it. Within a section, items follow their outline order.
+- Projects are "outline" (chapters → sections → items) or "board" (a list of tasks). Only leaves (items, board tasks) are booked; chapters and sections are containers.
+- A thesis or book maps like this: heading level 1 = chapter (number "2"), level 2 = section ("2.5"), level 3 = item ("2.5.1"). An item is the unit of work that gets booked; its checklist holds the points to cover, its notes anything else. Admin work (figures, references, emails) lives in a chapter without a number or in "Other".
+- duration_min is the item's total estimate; the planner books duration_min − spent_min. To give an item 2 more hours of which 1 h is already spent, set duration_min = spent_min + 120. planned: false keeps it off the schedule. A task deadline is hard; the project target_date is the overall goal.
+- Outline projects are worked through in their order (the writing order), which is separate from the outline: named phases of units, a unit being a section with all its items, or a task outside any section. Within a section, items follow their outline order. get_project shows it under "order"; set_order changes it. New sections fall in after their outline neighbour, which is often not where they belong: check the order after every structural change.
 - planned_finish in list_projects and get_project is when the planner expects the last block; compare it with target_date.
+- planning_notes (in get_project) says how this project is estimated. Follow it; when there is none, ask the user once and save it with update_project.
+
+Numbering (the outline shows these numbers, so they must be right)
+- Use the numbers exactly as they appear in the user's document. A section's number starts with its chapter's number, an item's with its section's: chapter 2 → 2.5 → 2.5.1.
+- When adding or moving, renumber the affected siblings in the same batch, or add {"op":"renumber","id":<chapter id>} (or {"op":"renumber"} for the whole project) at the end of the batch to number by outline position. Chapters like "A" (appendix) or without a number keep theirs.
+- Every apply_changes result lists numbering_problems if any are left. Fix them before you finish; do not apply a batch whose dry run shows problems you introduced.
+
+Estimating from a document
+- Base each item's estimate on the length of its text in the document (words, plus figures and tables), not on a fixed default. Count per subsection.
+- Use the pace in planning_notes. Without one, ask the user, e.g.: "How fast do you revise existing text and write new text?" A common starting point is revising about 800-1000 words per hour, writing new text 300-500 words per hour, about 30-60 min per figure or table; save the answer in planning_notes.
+- Finished text needs no time: mark it done only when the user says the part is final, otherwise estimate the revision. Missing text (headings with placeholders, "TODO", notes) needs new-writing time.
+- Split work over about 4 hours into several items, matching the subsections.
 
 Workflows
-1. Bring a project in line with a document (e.g. a thesis draft): get_project → compare structure, estimates and what is finished → one apply_changes batch with dry_run: true → show the list → apply with dry_run: false → if the writing order should change, propose it and call set_order → get_project and report planned_finish against target_date.
-2. Create a project from a description: create_project → one apply_changes batch: chapters with refs, sections with parent refs, items with parent refs and duration_min → set_order with the ids from the result if the work order differs from the outline → report planned_finish.
-3. Change only the writing order: get_project → rearrange the unit ids of "order" → show the proposed phases → set_order with the complete list.
+1. Bring a project in line with a document (e.g. a thesis draft): get_guide (once) → get_project → map the document's headings to chapters, sections and items by number and title → one apply_changes batch with dry_run: true: missing parts added with their numbers, moved parts moved, titles and numbers corrected, estimates from text length, points as checklists → show the list and any numbering_problems → apply with dry_run: false → get_project, check the order and propose set_order if the new parts are in the wrong place → report planned_finish against target_date.
+2. Create a project from a description: create_project (with planning_notes when known) → one apply_changes batch: chapters with refs, sections with parent refs, items with parent refs, numbers and duration_min → set_order with the ids from the result (or follow_outline: true) → report planned_finish.
+3. Change only the writing order: get_project → rearrange the unit ids of "order" → show the proposed phases → set_order with the complete list. To go back to the document order: set_order with follow_outline: true.
 4. Behind schedule: show which phases end after target_date and propose options (smaller estimates, items not planned for now, a later target); the user decides.
 
 Conventions
+- The document is the source of truth for structure, titles and numbers; the user decides what is done and the order.
 - Keep ids: update or move existing tasks instead of deleting and re-adding them, so logged work stays attached. Tasks with logged work cannot be deleted; mark them done.
-- Numbers: chapters "3", sections "3.2". When adding or moving, renumber the affected siblings in the same batch.
-- Estimates in minutes, realistic for the user; split work over about 4 hours into several items. Mark done only what the document clearly shows as finished; ask when unsure.
 - One batch per request (up to 300 changes); if any change fails, nothing is applied. undo_last_changes reverts the last applied batch of tasks (not the order).
 - Dates are YYYY-MM-DD; times are the user's local time. Answer in the user's language.`;
 
