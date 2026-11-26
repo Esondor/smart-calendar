@@ -460,7 +460,7 @@ export default async function mcpRoutes(app) {
       const ok = result => ({ jsonrpc: '2.0', id: m.id, result });
       if (m.method === 'initialize') {
         const v = VERSIONS.includes(m.params?.protocolVersion) ? m.params.protocolVersion : VERSIONS[0];
-        return ok({ protocolVersion: v, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'smart-calendar', title: 'Smart Calendar', version: '1.1.0' }, instructions: INSTRUCTIONS });
+        return ok({ protocolVersion: v, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'smart-calendar', title: 'Smart Calendar', version: '1.2.0' }, instructions: INSTRUCTIONS });
       }
       if (m.method === 'ping') return ok({});
       if (m.method === 'tools/list') return ok({ tools: TOOLS });
