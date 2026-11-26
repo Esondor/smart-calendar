@@ -180,3 +180,30 @@ test('planning notes and the order back to the outline', async () => {
   assert.match(o.order[0].phase, /^1 /);
   assert.equal(o.order[0].units[0].title, 'Motivation');
 });
+
+test('order changes in a batch: sibling placement, validation, dry run and undo', async () => {
+  const p0 = await tool('get_project', { project_id: pid });
+  const intro = p0.tree.find(x => x.title === 'Introduction'), outlook = p0.tree.find(x => x.title === 'Outlook');
+  // two phases: Outlook first, Introduction after
+  const intoUnits = intro.children.map(x => x.id), outUnits = outlook.children.map(x => x.id);
+  await tool('apply_changes', { project_id: pid, dry_run: false, changes: [{ op: 'order', phases: [{ phase: 'Out', units: outUnits }, { phase: 'Intro', units: intoUnits }] }] });
+  // a new section in the Introduction lands next to its siblings, not in the first phase
+  const a = await tool('apply_changes', { project_id: pid, dry_run: false, changes: [{ op: 'add', ref: 'n', parent: intro.id, title: 'Aims' }, { op: 'add', parent: 'n', title: 'Write aims', duration_min: 30 }] });
+  assert.deepEqual(a.order.find(x => x.phase === 'Intro').units.map(u => u.id), [...intoUnits, a.ids.n]);
+  // a section moved to the Outlook chapter follows it into that phase
+  const m = await tool('apply_changes', { project_id: pid, dry_run: false, changes: [{ op: 'move', id: a.ids.n, parent: outlook.id }] });
+  assert.deepEqual(m.order.find(x => x.phase === 'Out').units.map(u => u.id), [...outUnits, a.ids.n]);
+  // validation: a chapter, a missing unit
+  assert.match((await tool('apply_changes', { project_id: pid, dry_run: true, changes: [{ op: 'order', phases: [{ phase: 'X', units: [intro.id] }] }] })).error, /chapter/);
+  assert.match((await tool('apply_changes', { project_id: pid, dry_run: true, changes: [{ op: 'order', phases: [{ phase: 'X', units: outUnits }] }] })).error, /missing: .*Motivation/);
+  // one unit into a new phase, dry run first, then undo puts the order back
+  const d = await tool('apply_changes', { project_id: pid, dry_run: true, changes: [{ op: 'phase', id: a.ids.n, phase: 'Last' }] });
+  assert.equal(d.order.at(-1).phase, 'Last');
+  assert.ok(!(await tool('get_project', { project_id: pid })).order.some(x => x.phase === 'Last'), 'dry run keeps the order');
+  await tool('apply_changes', { project_id: pid, dry_run: false, changes: [{ op: 'phase', id: a.ids.n, phase: 'Last', position: 0 }] });
+  assert.ok((await tool('get_project', { project_id: pid })).order.some(x => x.phase === 'Last'));
+  await tool('undo_last_changes', { project_id: pid });
+  const after = (await tool('get_project', { project_id: pid })).order;
+  assert.ok(!after.some(x => x.phase === 'Last'));
+  assert.ok(after.find(x => x.phase === 'Out').units.some(u => u.id === a.ids.n));
+});

@@ -41,11 +41,18 @@ export function projectOrder(p, rows = all('SELECT * FROM tasks WHERE project_id
     phases = grps.map((g, i) => ({ name: String(names[g] || '').slice(0, 80) || (grps.length > 1 ? `Phase ${i + 1}` : 'Order'), units: keyed.filter(x => x.k[0] === g).map(x => x.u.id) }));
     if (!phases.length) phases = [{ name: 'Order', units: [] }];
   }
-  // units not in the order yet (new sections, new tasks): right after the unit before them in the outline
+  // units not in the order yet (new sections, sections moved to another chapter): next to their outline neighbour,
+  // preferring a sibling (after the previous one, else before the next one), then any unit before or after them
+  const where = id => phases.find(ph => ph.units.includes(id));
+  const at = (ref, id, after) => { const ph = where(ref); ph.units.splice(ph.units.indexOf(ref) + (after ? 1 : 0), 0, id); return true; };
   units.forEach((u, i) => {
-    if (phases.some(ph => ph.units.includes(u.id))) return;
-    for (let j = i - 1; j >= 0; j--) { const ph = phases.find(x => x.units.includes(units[j].id)); if (ph) { ph.units.splice(ph.units.indexOf(units[j].id) + 1, 0, u.id); return; } }
-    const first = phases.find(ph => ph.units.length) || phases[0]; first.units.unshift(u.id);
+    if (where(u.id)) return;
+    const sib = units.filter(x => (x.parent_id || null) === (u.parent_id || null)), k = sib.indexOf(u);
+    for (let j = k - 1; j >= 0; j--) if (where(sib[j].id)) return at(sib[j].id, u.id, true);
+    for (let j = k + 1; j < sib.length; j++) if (where(sib[j].id)) return at(sib[j].id, u.id, false);
+    for (let j = i - 1; j >= 0; j--) if (where(units[j].id)) return at(units[j].id, u.id, true);
+    for (let j = i + 1; j < units.length; j++) if (where(units[j].id)) return at(units[j].id, u.id, false);
+    (phases.find(ph => ph.units.length) || phases[0]).units.unshift(u.id);
   });
   return { phases };
 }
@@ -61,6 +68,13 @@ export function orderRanks(p, rows = all('SELECT * FROM tasks WHERE project_id =
     else for (const t of L) { const sub = kids(t.id); if (sub.length) sub.forEach(x => rank.set(x.id, n++)); else rank.set(t.id, n++); }
   }
   return rank;
+}
+
+// the units of a project with what they are (for checking an order someone sends)
+export function unitList(pid) {
+  const rows = all('SELECT * FROM tasks WHERE project_id = ?', pid), { units, kids } = unitsOf(rows);
+  const open = u => { const L = levelOf(u) === 'section' ? kids(u.id) : [u]; return !L.length || L.some(x => x.status !== 'done'); };
+  return { units: units.map(u => ({ id: u.id, open: open(u) })), rows };
 }
 
 export function saveOrder(pid, body) {

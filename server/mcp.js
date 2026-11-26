@@ -6,7 +6,7 @@ import { getPlan, calendarEvents } from './planner.js';
 import * as A from './actions.js';
 import { audit } from './logs.js';
 import { userFromBearer, resourceUrl, issuer } from './oauth.js';
-import { projectOrder, saveOrder } from './order.js';
+import { projectOrder, saveOrder, unitList } from './order.js';
 import { isOrdered } from './planner.js';
 
 const VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -76,8 +76,8 @@ function getProject(uid, pid, includeDone = true) {
 }
 // the order the planner works through the project: phases of units (sections or loose tasks)
 function orderOut(p) {
-  const title = id => get('SELECT title FROM tasks WHERE id = ?', id)?.title;
-  return projectOrder({ ...p, meta: JSON.stringify(p.meta) }).phases.map(ph => ({ phase: ph.name, units: ph.units.map(id => ({ id, title: title(id) })) }));
+  const unit = id => { const t = taskRow(get('SELECT * FROM tasks WHERE id = ?', id)), m = t.meta || {}; return clean({ id, number: m.sid || m.n || null, title: t.title, done: t.status === 'done' || undefined }); };
+  return projectOrder({ ...p, meta: JSON.stringify(p.meta) }).phases.map(ph => ({ phase: ph.name, units: ph.units.map(unit) }));
 }
 function setOrder(uid, a) {
   const p = needProject(uid, a.project_id);
@@ -141,7 +141,10 @@ export function applyChanges(uid, pid, changes, dry) {
     return par;
   };
   const q = t => `“${t.length > 60 ? t.slice(0, 57) + '…' : t}”`;
-  const snapshot = dry ? null : { at: Date.now(), rows: all('SELECT * FROM tasks WHERE project_id = ?', p.id) };
+  const snapshot = dry ? null : { at: Date.now(), rows: all('SELECT * FROM tasks WHERE project_id = ?', p.id), order: p.meta.order ?? null };
+  // ordered projects: the order as it is now is kept, so new and moved parts land next to their outline neighbour
+  const ordered = isOrdered(p.meta, p.kind), order0 = ordered ? projectOrder({ ...p, meta: JSON.stringify(p.meta) }).phases : null;
+  const moved = new Set(), orderOps = []; let structural = false;
   db.exec('BEGIN');
   try {
     changes.forEach((c, n) => {
@@ -160,7 +163,7 @@ export function applyChanges(uid, pid, changes, dry) {
           const row = { project_id: p.id, parent_id: par?.id ?? null, title: set.title, duration: leaf ? (outline ? s.dSub || 90 : s.dFree || 60) : 30, auto: leaf ? 1 : 0, grp: par?.grp || 0,
             sort: 1e9, assignee_id: uid, created_by: uid, created_at: now, updated_at: now, ...set, meta: JSON.stringify(meta) };
           const id = Number(run(`INSERT INTO tasks(${Object.keys(row).join(',')}) VALUES (${Object.keys(row).map(() => '?').join(',')})`, ...Object.values(row)).lastInsertRowid);
-          place(p.id, row.parent_id, id, c.position);
+          place(p.id, row.parent_id, id, c.position); structural = true;
           if (c.ref != null) refs.set(String(c.ref), id);
           lines.push(`Add ${level || 'task'} ${q(row.title)}${par ? ` under ${q(par.title)}` : ''}${leaf ? `, ${row.duration} min` : ''}`);
         } else if (c.op === 'update') {
@@ -175,6 +178,8 @@ export function applyChanges(uid, pid, changes, dry) {
           const t = own(resolve(c.id)), level = outline ? lvl(t) : null;
           const par = 'parent' in c ? (outline ? parentOf(c.parent, level) : (c.parent == null ? null : own(resolve(c.parent)))) : (t.parent_id ? own(t.parent_id) : null);
           if (par && subtree(t.id).some(x => x.id === par.id)) fail('cannot move a task into itself');
+          if ((par?.id ?? null) !== (t.parent_id ?? null)) moved.add(t.id);
+          structural = true;
           run('UPDATE tasks SET parent_id = ?, grp = ?, updated_at = ? WHERE id = ?', par?.id ?? null, par ? par.grp : t.grp, Date.now(), t.id);
           place(p.id, par?.id ?? null, t.id, c.position);
           lines.push(`Move ${q(t.title)}${'parent' in c ? (par ? ` under ${q(par.title)}` : ' to the top level') : ''}${c.position != null ? ` to position ${+c.position + 1}` : ''}`);
@@ -186,7 +191,7 @@ export function applyChanges(uid, pid, changes, dry) {
           const t = own(resolve(c.id)), all_ = subtree(t.id);
           if (all_.some(x => x.spent > 0) || get(`SELECT 1 FROM work_log WHERE task_id IN (${all_.map(() => '?').join(',')}) LIMIT 1`, ...all_.map(x => x.id))) fail(`${q(t.title)} has logged work; mark it done instead`);
           if (all_.some(x => x.ext_source)) fail(`${q(t.title)} comes from Vikunja; change it there`);
-          run('DELETE FROM tasks WHERE id = ?', t.id);
+          run('DELETE FROM tasks WHERE id = ?', t.id); structural = true;
           lines.push(`Delete ${q(t.title)}${all_.length > 1 ? ` with ${all_.length - 1} inside` : ''}`);
         } else if (c.op === 'renumber') {
           if (!outline) fail('only outline projects have numbers');
@@ -194,21 +199,69 @@ export function applyChanges(uid, pid, changes, dry) {
           if (ch && lvl(ch) !== 'chapter') fail('renumber takes a chapter id, or no id for the whole project');
           const n0 = renumber(p.id, ch?.id ?? null);
           lines.push(`Renumber ${ch ? q(ch.title) : 'all chapters'}: ${n0} number${n0 === 1 ? '' : 's'} changed`);
-        } else fail('op is add, update, move, done, delete or renumber');
+        } else if (c.op === 'order' || c.op === 'phase') {
+          if (!ordered) fail('this project has no order');
+          if (c.op === 'order' && (!Array.isArray(c.phases) || !c.phases.length)) fail('phases is empty');
+          if (c.op === 'phase' && !str(c.phase ?? '', 80).trim()) fail('phase is missing');
+          orderOps.push({ c, n });
+        } else fail('op is add, update, move, done, delete, renumber, order or phase');
       } catch (e) { e.message = `Change ${n + 1}${c?.op ? ` (${c.op})` : ''}: ${e.message}`; throw e; }
     });
     // the done changes run after the rest, with the app's own logic (parents close, follow-ups, Vikunja)
     for (const d of doneOps) if (!get('SELECT 1 FROM tasks WHERE id = ?', d.id)) fail('A task marked done is deleted in the same batch');
+    if (ordered && (structural || orderOps.length)) {
+      // moved parts are taken out and placed again where they now are; then the order changes run
+      saveOrder(p.id, { phases: order0.map(ph => ({ name: ph.name, units: ph.units.filter(id => !moved.has(id)) })) });
+      for (const { c, n } of orderOps) {
+        try { lines.push(applyOrderOp(p, c, resolve)); }
+        catch (e) { e.message = `Change ${n + 1} (${c.op}): ${e.message}`; throw e; }
+      }
+      var orderNow = orderOut(needProject(uid, p.id));
+    }
     var warnings = outline ? numberingProblems(p.id) : [];
     db.exec(dry ? 'ROLLBACK' : 'COMMIT');
   } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
   const warn = warnings.length ? { numbering_problems: warnings.slice(0, 40), fix: 'Set the numbers with update changes, or add {"op":"renumber"} (whole project) or {"op":"renumber","id":<chapter>} to number by outline position.' } : {};
-  if (dry) return { dry_run: true, changes: lines, ...warn };
+  const ord = orderNow ? { order: orderNow } : {};
+  if (dry) return { dry_run: true, changes: lines, ...warn, ...ord };
   kvSet(undoKey(uid, p.id), snapshot);
   for (const d of doneOps) A.setDone(uid, d.id, 0, d.done, 'Claude');
   logActivity(p.id, uid, `Claude: ${lines.length} change${lines.length === 1 ? '' : 's'}`);
   A.touchProject(p.id);
-  return { applied: true, changes: lines, ...(refs.size ? { ids: Object.fromEntries(refs) } : {}), ...warn };
+  return { applied: true, changes: lines, ...(refs.size ? { ids: Object.fromEntries(refs) } : {}), ...warn, ...ord };
+}
+
+// {"op":"order","phases":[{"phase":"…","units":[id or ref]}]} replaces the whole order;
+// {"op":"phase","id":…,"phase":"…","position":0} moves one unit into a phase (a new name adds the phase at the end)
+function applyOrderOp(p, c, resolve) {
+  const { units, rows } = unitList(p.id), known = new Map(units.map(u => [u.id, u])), by = new Map(rows.map(r => [r.id, r]));
+  const label = id => { const t = by.get(id); if (!t) return `${id}`; const m = J(t.meta, {}); return `${id} (${[m.sid || m.n || m.num, t.title].filter(Boolean).join(' ')})`; };
+  const unitId = v => {
+    const id = resolve(v);
+    if (known.has(id)) return id;
+    const t = by.get(id); if (!t) fail(`${id} is not a task of this project`);
+    const lv = J(t.meta, {}).level;
+    fail(`${label(id)} is ${lv === 'chapter' ? 'a chapter; list its sections instead' : 'inside a section; list the section instead'}`);
+  };
+  const cur = projectOrder(get('SELECT * FROM projects WHERE id = ?', p.id)).phases;
+  let phases;
+  if (c.op === 'order') {
+    const seen = new Set();
+    phases = c.phases.slice(0, 100).map((ph, i) => ({ name: str(ph?.phase ?? ph?.name ?? '', 80).trim() || `Phase ${i + 1}`,
+      units: (Array.isArray(ph?.units) ? ph.units : []).map(v => { const id = unitId(typeof v === 'object' && v ? v.id : v); if (seen.has(id)) fail(`${label(id)} is listed twice`); seen.add(id); return id; }) }));
+    const missing = units.filter(u => u.open && !seen.has(u.id));
+    if (missing.length) fail(`every open unit must be listed once; missing: ${missing.slice(0, 30).map(u => label(u.id)).join(', ')}${missing.length > 30 ? ` and ${missing.length - 30} more` : ''}`);
+  } else {
+    const id = unitId(c.id), name = str(c.phase, 80).trim();
+    phases = cur.map(ph => ({ ...ph, units: ph.units.filter(x => x !== id) }));
+    let ph = phases.find(x => x.name.toLowerCase() === name.toLowerCase());
+    if (!ph) { ph = { name, units: [] }; phases.push(ph); }
+    const i = c.position == null || isNaN(+c.position) ? ph.units.length : Math.max(0, Math.min(ph.units.length, Math.round(+c.position)));
+    ph.units.splice(i, 0, id);
+  }
+  saveOrder(p.id, { phases });
+  if (c.op === 'order') return `Set the order: ${phases.length} phases, ${phases.reduce((a, x) => a + x.units.length, 0)} units`;
+  return `Put ${label(resolve(c.id))} into phase “${str(c.phase, 80).trim()}”${c.position != null ? ` at position ${+c.position + 1}` : ''}`;
 }
 
 // numbers from the outline position: numeric chapters 1, 2, 3 … (counting on from the first one's number),
@@ -265,6 +318,7 @@ export function undoLast(uid, pid) {
     }
     // only now: tasks added by the batch (nothing from before hangs under them any more)
     for (const { id } of all('SELECT id FROM tasks WHERE project_id = ?', p.id)) if (!before.has(id)) run('DELETE FROM tasks WHERE id = ?', id);
+    if ('order' in snap) { const m = J(get('SELECT meta FROM projects WHERE id = ?', p.id).meta, {}); if (snap.order) m.order = snap.order; else delete m.order; run('UPDATE projects SET meta = ? WHERE id = ?', JSON.stringify(m), p.id); }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   kvSet(undoKey(uid, p.id), null);
@@ -319,7 +373,7 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { project_id: { type: 'integer' }, include_done: { type: 'boolean', description: 'Default true' } }, required: ['project_id'] }, annotations: { readOnlyHint: true } },
   { name: 'get_schedule', title: 'Read the schedule', description: 'Planned work blocks and calendar appointments for the coming days.',
     inputSchema: { type: 'object', properties: { days: { type: 'integer', minimum: 1, maximum: 31, description: 'Default 7' } } }, annotations: { readOnlyHint: true } },
-  { name: 'apply_changes', title: 'Change a project', description: 'Add, update, move, finish or delete tasks of one project in one batch (all or nothing; an error names the change number). Call it with dry_run: true first, show the user the returned list, and send the same changes with dry_run: false only after they agree. The planner reschedules right after. New tasks get a "ref" so later changes in the same batch can use it as id or parent; the applied result maps each ref to its new id (for set_order). Example: [{"op":"add","ref":"c4","title":"Results","number":"4"}, {"op":"add","ref":"s41","parent":"c4","title":"Main effect","number":"4.1"}, {"op":"add","parent":"s41","title":"Write first draft","duration_min":180}, {"op":"update","id":123,"duration_min":240,"deadline":"2026-12-20"}, {"op":"move","id":130,"parent":"c4","position":0}, {"op":"done","id":118}]',
+  { name: 'apply_changes', title: 'Change a project', description: 'Add, update, move, finish or delete tasks of one project in one batch (all or nothing; an error names the change number). Call it with dry_run: true first, show the user the returned list, and send the same changes with dry_run: false only after they agree. The planner reschedules right after. New tasks get a "ref" so later changes in the same batch can use it as id or parent; the applied result maps each ref to its new id (for set_order). Example: [{"op":"add","ref":"c4","title":"Results","number":"4"}, {"op":"add","ref":"s41","parent":"c4","title":"Main effect","number":"4.1"}, {"op":"add","parent":"s41","title":"Write first draft","duration_min":180}, {"op":"update","id":123,"duration_min":240,"deadline":"2026-12-20"}, {"op":"move","id":130,"parent":"c4","position":0}, {"op":"done","id":118}]. Order (outline projects): {"op":"order","phases":[{"phase":"Ch. 3 results","units":[51,"s41"]}]} replaces the whole writing order (every open unit once); {"op":"phase","id":51,"phase":"Ch. 3 results","position":0} moves one unit (a new phase name adds that phase at the end). Results of ordered projects include the order after the changes.',
     inputSchema: { type: 'object', required: ['project_id', 'changes', 'dry_run'], properties: {
       project_id: { type: 'integer' }, dry_run: { type: 'boolean', description: 'true = only check and describe the changes' },
       changes: { type: 'array', maxItems: 300, items: { type: 'object', required: ['op'], properties: {
@@ -350,7 +404,7 @@ How it works
 - Projects are "outline" (chapters → sections → items) or "board" (a list of tasks). Only leaves (items, board tasks) are booked; chapters and sections are containers.
 - A thesis or book maps like this: heading level 1 = chapter (number "2"), level 2 = section ("2.5"), level 3 = item ("2.5.1"). An item is the unit of work that gets booked; its checklist holds the points to cover, its notes anything else. Admin work (figures, references, emails) lives in a chapter without a number or in "Other".
 - duration_min is the item's total estimate; the planner books duration_min − spent_min. To give an item 2 more hours of which 1 h is already spent, set duration_min = spent_min + 120. planned: false keeps it off the schedule. A task deadline is hard; the project target_date is the overall goal.
-- Outline projects are worked through in their order (the writing order), which is separate from the outline: named phases of units, a unit being a section with all its items, or a task outside any section. Within a section, items follow their outline order. get_project shows it under "order"; set_order changes it. New sections fall in after their outline neighbour, which is often not where they belong: check the order after every structural change.
+- Outline projects are worked through in their order (the writing order), which is separate from the outline: named phases of units, a unit being a section with all its items, or a task outside any section. Within a section, items follow their outline order. get_project shows it under "order". Change it inside apply_changes with {"op":"order"} (the complete order, every open unit once) or {"op":"phase"} (one unit into a phase), so it is previewed with dry_run and undone with the batch; set_order does the same on its own. New sections and sections moved to another chapter go next to their outline siblings (after the previous one, else before the next one), which is not always where they belong: check the "order" in the result of every structural change and add an order change to the same batch when needed.
 - planned_finish in list_projects and get_project is when the planner expects the last block; compare it with target_date.
 - planning_notes (in get_project) says how this project is estimated. Follow it; when there is none, ask the user once and save it with update_project.
 
@@ -366,15 +420,15 @@ Estimating from a document
 - Split work over about 4 hours into several items, matching the subsections.
 
 Workflows
-1. Bring a project in line with a document (e.g. a thesis draft): get_guide (once) → get_project → map the document's headings to chapters, sections and items by number and title → one apply_changes batch with dry_run: true: missing parts added with their numbers, moved parts moved, titles and numbers corrected, estimates from text length, points as checklists → show the list and any numbering_problems → apply with dry_run: false → get_project, check the order and propose set_order if the new parts are in the wrong place → report planned_finish against target_date.
+1. Bring a project in line with a document (e.g. a thesis draft): get_guide (once) → get_project → map the document's headings to chapters, sections and items by number and title → one apply_changes batch with dry_run: true: missing parts added with their numbers, moved parts moved, titles and numbers corrected, estimates from text length, points as checklists → show the list and any numbering_problems → apply with dry_run: false → get_project, check the "order" returned and add an order change if the new parts are in the wrong place → report planned_finish against target_date.
 2. Create a project from a description: create_project (with planning_notes when known) → one apply_changes batch: chapters with refs, sections with parent refs, items with parent refs, numbers and duration_min → set_order with the ids from the result (or follow_outline: true) → report planned_finish.
-3. Change only the writing order: get_project → rearrange the unit ids of "order" → show the proposed phases → set_order with the complete list. To go back to the document order: set_order with follow_outline: true.
+3. Change only the writing order: get_project → rearrange the unit ids of "order" → show the proposed phases → apply_changes with one {"op":"order"} (dry_run first). To go back to the document order: set_order with follow_outline: true.
 4. Behind schedule: show which phases end after target_date and propose options (smaller estimates, items not planned for now, a later target); the user decides.
 
 Conventions
 - The document is the source of truth for structure, titles and numbers; the user decides what is done and the order.
 - Keep ids: update or move existing tasks instead of deleting and re-adding them, so logged work stays attached. Tasks with logged work cannot be deleted; mark them done.
-- One batch per request (up to 300 changes); if any change fails, nothing is applied. undo_last_changes reverts the last applied batch of tasks (not the order).
+- One batch per request (up to 300 changes); if any change fails, nothing is applied. undo_last_changes reverts the last applied batch, including its order changes.
 - Dates are YYYY-MM-DD; times are the user's local time. Answer in the user's language.`;
 
 function call(uid, name, a = {}) {
