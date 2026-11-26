@@ -1,5 +1,6 @@
 // Demo: answers the app's /api requests in the browser from data.json (recorded by scripts/demo.mjs), moved to
-// today. What a visitor changes (tick off, edit, add, start a timer, settings) is kept until the page reloads.
+// today. Every action shows on screen as it would in the app (nothing is sent anywhere); it is kept until the page
+// reloads.
 (() => {
   const base = new URL('.', document.currentScript.src).href;
   const DAY = 864e5;
@@ -59,8 +60,42 @@
       if (x && (body.dismiss || body.same)) c.items = c.items.filter(i => i !== x); else if (x && body.choice) Object.assign(x, { choice: body.choice, by_me: body.choice === 'auto' ? 0 : 1 });
       return c;
     }
-    note();
-    return { ok: true };
+    // ----- the rest: shown on screen as the app would -----
+    const H = 3600e3, cal = id => D('/api/accounts').flatMap(x => x.calendars || []).find(c => c.id === +id) || {};
+    const evOf = id => plan().events.find(e => e.id === +id);
+    if ((m = p.match(/^\/api\/tasks\/(\d+)\/(postpone|skip)$/))) {   // later: off today, back at the chosen time
+      const t = taskOf(m[1]); if (!t) return { ok: true };
+      if (plan().active?.task_id === t.id) stop(false);
+      const bs = plan().blocks.filter(b => plan().units[b.key]?.taskId === t.id); drop(t.id); gone.delete(t.id);
+      if (m[2] === 'postpone' && bs.length) { const at = Math.max(+body.until || Date.now() + 864e5, Date.now()), d = bs[0].e - bs[0].s; plan().blocks.push({ ...bs[0], s: at, e: at + d, pinned: false }); }
+      return { ok: true };
+    }
+    if ((m = p.match(/^\/api\/tasks\/(\d+)\/pin$/))) {   // moved in the calendar
+      const b = plan().blocks.find(x => plan().units[x.key]?.taskId === +m[1] && (body.oldStart == null || x.s === +body.oldStart));
+      if (b) { if (body.s == null) b.pinned = false; else Object.assign(b, { s: +body.s, e: +body.e, pinned: true }); }
+      return { ok: true };
+    }
+    if ((m = p.match(/^\/api\/tasks\/(\d+)\/auto$/))) { plan().blocks.filter(x => plan().units[x.key]?.taskId === +m[1]).forEach(b => { b.pinned = false; }); return { ok: true }; }
+    if ((m = p.match(/^\/api\/tasks\/(\d+)\/next$/))) { const k = plan().nextKeys.find(x => plan().nextUnits[x]?.taskId === +m[1]); if (k) plan().nextKeys = [k, ...plan().nextKeys.filter(x => x !== k)]; return { ok: true }; }
+    if (p === '/api/events' && method === 'POST') {
+      const c = cal(body.calendar_id), e = { id: ++nextId, title: body.title, start: +body.start, end: +body.end, all_day: !!body.all_day, location: body.location || null, cal: c.name, color: c.color, calendar_id: c.id, blocks: true, before: 0, after: 0, editable: true, alsoIn: [] };
+      plan().events.push(e); return e;
+    }
+    if ((m = p.match(/^\/api\/events\/(\d+)$/))) {
+      const e = evOf(m[1]); if (!e) return { ok: true };
+      if (method === 'DELETE') { plan().events = plan().events.filter(x => x !== e); return { ok: true }; }
+      Object.assign(e, ['title', 'start', 'end', 'location', 'all_day'].reduce((a, k) => (k in body ? { ...a, [k]: body[k] } : a), {})); return e;
+    }
+    if ((m = p.match(/^\/api\/events\/(\d+)\/done$/))) { const e = evOf(m[1]); if (e) { e.done = true; if (body.end) e.end = +body.end; } return { ok: true }; }
+    if (p === '/api/appts' && method === 'POST') { const id = ++nextId; plan().busy.push({ kind: 'appt', s: +body.start, e: +body.end, t: body.title || 'Blocked', id }); return { id }; }
+    if ((m = p.match(/^\/api\/appts\/(\d+)$/))) { plan().busy = plan().busy.filter(b => b.id !== +m[1]); return { ok: true }; }
+    if (p === '/api/now/break' || p === '/api/now/interrupt') { stop(false); const n = Date.now(); plan().busy.push({ kind: 'appt', s: n, e: n + (+body.minutes || 15) * 60000, t: body.title || 'Break', id: ++nextId }); return { ok: true }; }
+    if (p === '/api/flexible') { const t = { id: ++nextId, title: body.title, status: 'todo', duration: +body.minutes || 30, meta: { win: body.win }, points: [], project_id: (D('/api/projects')[0] || {}).id, created_at: Date.now(), updated_at: Date.now() }; tasks().push(t); return { id: t.id }; }
+    if ((m = p.match(/^\/api\/calendars\/(\d+)$/))) { const c = cal(m[1]); Object.assign(c, body); return c; }
+    if ((m = p.match(/^\/api\/accounts\/(\d+)$/)) && method === 'PATCH') { const a = D('/api/accounts').find(x => x.id === +m[1]) || {}; a.cfg = { ...(a.cfg || {}), ...body }; return a; }
+    if (p === '/api/me/tokens') return { token: 'sc_demo_' + Math.random().toString(36).slice(2, 14) };
+    if (p === '/api/invites') { const code = Math.random().toString(36).slice(2, 8).toUpperCase(); return { code, url: location.origin + location.pathname + '#/join/' + code, expires: Date.now() + 14 * 864e5 }; }
+    return { ok: true, id: ++nextId, ...body };
   }
   // a task leaves the plan (done): its blocks and its place in "next" are kept for undo
   function drop(id) {
@@ -86,8 +121,6 @@
     if (/^\/api\/(files|places|travel)/.test(p)) return [];
     return {};
   }
-  let told = false;
-  function note() { if (told) return; told = true; const n = document.createElement('div'); n.className = 'demo-note'; n.textContent = 'This is a demo: calendars, servers and other people are not connected.'; document.body.append(n); setTimeout(() => n.remove(), 5000); }
 
   const real = window.fetch.bind(window);
   window.fetch = async (input, opt = {}) => {
@@ -103,12 +136,14 @@
   window.EventSource = class { constructor() { setTimeout(() => this.onmessage?.({ data: '{"what":"hello"}' }), 50); } close() {} };
   if (navigator.serviceWorker) navigator.serviceWorker.register = () => Promise.resolve();
   // downloads and links into the server
-  document.addEventListener('click', e => { const a = e.target.closest?.('a[href^="/api/"]'); if (a) { e.preventDefault(); note(); } }, true);
+  document.addEventListener('click', e => {   // the backup download: the demo's own data
+    const a = e.target.closest?.('a[href^="/api/"]'); if (!a) return; e.preventDefault();
+    if (/^\/api\/export/.test(a.getAttribute('href'))) { const u = URL.createObjectURL(new Blob([JSON.stringify({ projects: D('/api/projects'), tasks: tasks() }, null, 2)], { type: 'application/json' })); const l = document.createElement('a'); l.href = u; l.download = 'smart-calendar-demo.json'; l.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); }
+  }, true);
 
   const css = document.createElement('style');
   css.textContent = '.demo-pill{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);z-index:999;font:600 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;padding:6px 10px;border-radius:99px;background:rgba(0,0,0,.55);color:#fff;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);pointer-events:none}'
-    + '@media (max-width:860px){.demo-pill{bottom:auto;top:calc(env(safe-area-inset-top) + 8px)}}'
-    + '.demo-note{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);z-index:999;font:13px/1.35 -apple-system,system-ui,sans-serif;padding:9px 14px;border-radius:10px;background:rgba(0,0,0,.75);color:#fff;max-width:90vw;text-align:center}';
+    + '@media (max-width:860px){.demo-pill{bottom:auto;top:calc(env(safe-area-inset-top) + 8px)}}';
   document.head.append(css);
   addEventListener('DOMContentLoaded', () => { const d = document.createElement('div'); d.className = 'demo-pill'; d.textContent = 'Demo'; document.body.append(d); });
 })();
