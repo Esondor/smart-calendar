@@ -1,8 +1,8 @@
 // Public pages (no login) – needed for Google's OAuth branding verification: homepage + privacy policy.
 import { serverConf } from './serverconf.js';
 
-const esc = s => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const page = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+export const esc = s => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+export const page = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title><link rel="icon" href="/icon.svg"><style>
 :root{color-scheme:light dark}body{margin:0;font:17px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;background:Canvas;color:CanvasText;-webkit-font-smoothing:antialiased}
 main{max-width:680px;margin:0 auto;padding:64px 24px}h1{font-size:40px;letter-spacing:-.03em;margin:16px 0 8px}h2{font-size:21px;margin:36px 0 6px}p,li{color:color-mix(in srgb,CanvasText 78%,transparent)}

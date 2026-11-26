@@ -296,6 +296,22 @@ function Tokens() {
     <div class="cell"><button class="ghost" style="padding-left:0" onClick=${async () => { const n = await ask('New Token', 'Home Assistant, Mac…'); if (n) { const r = await post('/api/me/tokens', { name: n }); setShown(r.token); reload(); } }}>${I('plus', 15)}New Token</button></div>
   </div>`;
 }
+// Claude connector: off until you turn it on; claude.ai then connects with your own Claude account and only reaches your projects
+function Claude() {
+  const [c, setC] = useState(null); const reload = () => api('/api/me/claude').then(setC);
+  useEffect(() => { reload(); }, []);
+  if (!c) return null;
+  const toggle = async on => {
+    if (!on && c.connections.length && !(await confirmDialog('Turn off Claude and disconnect it?', 'Turn Off', true))) return reload();
+    try { await api('/api/me/claude', { method: 'PUT', body: { on } }); } catch (e) { toast(e.message); } reload();
+  };
+  return html`<div class="box">
+    <label class="cell"><span>Allow Claude</span><input type="checkbox" checked=${c.on} onChange=${e => toggle(e.target.checked)}/></label>
+    ${c.on && html`<div class="cell" style="flex-wrap:wrap"><code style="user-select:all;word-break:break-all;flex:1">${c.url}</code><button class="ghost" onClick=${() => navigator.clipboard?.writeText(c.url).then(() => toast('Copied'))}>Copy</button></div>`}
+  </div>
+  ${c.on && c.connections.length > 0 && html`<${Sect} t="Connected"/><div class="box">${c.connections.map(x => html`<div class="cell"><span>${x.name}</span><span class="hint">${x.last_used ? when(x.last_used) : 'Never used'}</span>
+    <button class="icon" title="Disconnect" onClick=${async () => { if (await confirmDialog(`Disconnect “${x.name}”?`, 'Disconnect', true)) { await del('/api/me/claude/' + x.id); reload(); } }}>${I('trash', 15)}</button></div>`)}</div>`}`;
+}
 // Mac menu bar app: download, then hand it the address and a new token through its link (it asks before it connects)
 const isMac = /Macintosh/.test(navigator.userAgent) && !navigator.maxTouchPoints;
 function MacBar() {
@@ -381,6 +397,7 @@ export default function SettingsView() {
     <${Group} id="notify" icon="bell" color="#ff9f0a" title="Notifications"><${Notify}/></${Group}>
     <${Group} id="look" icon="sun" color="#30b0c7" title="Appearance" sub=${bg}><${Appearance}/></${Group}>
     <${Group} id="devices" icon="shield" color="#34c759" title="Devices & Access" sub="Signed-in devices, tokens"><${Sect} t="Devices"/><div class="box"><${Sessions}/></div>${isMac && html`<${MacBar}/>`}<${Tokens}/></${Group}>
+    <${Group} id="claude" icon="bolt" color="#d97757" title="Claude"><${Claude}/></${Group}>
     <${Group} id="data" icon="folder" color="#8e8e93" title="Backup & Restore"><${Data}/></${Group}>
     <${Group} id="help" icon="book" color="#64d2ff" title="Commands" sub="/done, /flex 30 …"><${Help}/></${Group}>
     <div class="box grp-links">

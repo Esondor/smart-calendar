@@ -345,6 +345,30 @@ const MIGRATIONS = [
   `
   ALTER TABLE event_track ADD COLUMN began INTEGER;     -- the real start given with Start (earlier or later than planned)
   `,
+  `
+  CREATE TABLE oauth_clients (                          -- apps registered for the Claude connector (OAuth dynamic client registration)
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    redirect_uris TEXT NOT NULL,
+    secret_hash TEXT,                                   -- null = public client (PKCE only)
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE oauth_codes (
+    code_hash TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    redirect_uri TEXT NOT NULL, challenge TEXT NOT NULL, scope TEXT,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE TABLE oauth_tokens (                           -- one row per connection a user allowed
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    client_id TEXT NOT NULL REFERENCES oauth_clients(id) ON DELETE CASCADE,
+    access_hash TEXT UNIQUE, access_exp INTEGER,
+    refresh_hash TEXT UNIQUE, refresh_exp INTEGER,
+    created_at INTEGER NOT NULL, last_used INTEGER, ip TEXT
+  );
+  `,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

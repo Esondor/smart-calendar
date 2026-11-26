@@ -184,10 +184,13 @@ function App() {
   return html`<${Shell}/>`;
 }
 
+// connecting Claude while signed out: back to its consent page once signed in
+{ const n = new URLSearchParams(location.search).get('next'); if (n && n.startsWith('/oauth/authorize?')) { sessionStorage.setItem('next', n); history.replaceState(null, '', '/' + location.hash); } }
 async function start() {
   try { await load(['boot']); } catch {}
   if (!S.state.me) { S.set({ me: null }); return; }
   if (S.state.must2fa) return;
+  const next = sessionStorage.getItem('next'); if (next) { sessionStorage.removeItem('next'); location.replace(next); return; }
   await load(['projects', 'tasks', 'plan', 'accounts']);
   connectStream();
   const m = location.hash.match(/^#\/task\/(\d+)/); if (m) { location.hash = '#/tasks'; openTask(+m[1]); }

@@ -267,6 +267,15 @@ Each person installs it on their own Mac with their own account. Revoking the "M
 
 **Battery:** the app has no web engine and no polling loop. One idle connection to `/api/ext/stream` says when the plan changed, and only then is the agenda fetched. The label is redrawn only when its text changes. Nothing runs while the display sleeps. In Low Power Mode it fetches every 15 minutes instead. The stream sends a keep-alive line every 50 s, which the default 60 s proxy timeout allows.
 
+### Claude
+
+Each user can let their own Claude account read and change their projects: Settings → Claude → Allow Claude, copy the URL (`https://<your domain>/mcp`), and add it in claude.ai under Settings → Connectors → Add custom connector. Claude opens this server's sign-in and asks you to allow it. After that, a chat can, for example, read your thesis draft and bring the outline in line with it: Claude shows the list of changes first and applies them only after you agree; the last batch can be undone.
+
+- Off for everyone until they turn it on themselves; turning it off disconnects at once. Connections are listed there and can be removed one by one.
+- The server stores nothing about Claude. Each user signs in with their own Claude account, and a connection only reaches that user's projects.
+- Only Claude's own callback (or a loopback address, for Claude Code / Claude Desktop) can receive a sign-in; access tokens last an hour, refresh tokens 60 days and rotate.
+- The reverse proxy must pass `/mcp`, `/oauth/` and `/.well-known/` to the app, which it does when the whole domain points to it.
+
 ## Sign-in
 
 Passkeys (Face ID / Touch ID) are the default sign-in. Add one under Settings → Account → Passkey. Passwords remain as a fallback. A passkey also counts as a second factor for the 2FA policy.

@@ -14,6 +14,8 @@ import adminRoutes from './admin.js';
 import extRoutes from './ext.js';
 import passkeyRoutes from './passkeys.js';
 import inviteRoutes from './invites.js';
+import oauthRoutes from './oauth.js';
+import mcpRoutes from './mcp.js';
 import { startBackups } from './backup.js';
 import publicPages from './public-pages.js';
 import { serverConf } from './serverconf.js';
@@ -97,6 +99,8 @@ await app.register(adminRoutes);
 await app.register(extRoutes);
 await app.register(passkeyRoutes);
 await app.register(inviteRoutes);
+await app.register(oauthRoutes);   // Claude connector: sign-in, then /mcp (off unless a user turns it on)
+await app.register(mcpRoutes);
 startBackups();
 // flexible appointments made before they had their own project move into "Appointments"
 import('./flex.js').then(({ appointmentsProject }) => {
