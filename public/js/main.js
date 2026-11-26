@@ -149,7 +149,7 @@ function Pull() {
     const show = v => { const n = ind.current; n.style.top = el().offsetTop + 'px'; n.style.opacity = Math.min(1, v / MAX); n.style.transform = `translate(-50%, ${Math.min(v, MAX) - 34}px)`; n.firstChild.style.transform = busy ? '' : `rotate(${v * 5}deg)`; };
     const scrollerOf = t => t.closest('.calbody, .now>section, .ol>section') || el();
     const start = e => {
-      if (busy || e.touches.length !== 1 || e.target.closest('.ev, .modalbg, .side, .tabbar, input, textarea, select')) { y0 = null; return; }
+      if (busy || e.touches.length !== 1 || e.target.closest('.ev, .modalbg, .side, .tabbar, .cal, input, textarea, select')) { y0 = null; return; }   // not in the calendar: its top stays put
       y0 = scrollerOf(e.target).scrollTop <= 0 ? e.touches[0].clientY : null; d = 0;
     };
     const move = e => { if (y0 == null) return; d = e.touches[0].clientY - y0; if (d <= 0 || scrollerOf(e.target).scrollTop > 0) { if (d < 0) y0 = null; show(0); return; } show(d * .5); };

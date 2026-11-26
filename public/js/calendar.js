@@ -4,7 +4,7 @@ import { I } from './icons.js';
 import { blockTime } from './now.js';
 import { openEventSheet, EventFields, googleCals, atTime, AlsoDots } from './eventsheet.js';
 
-const H0 = 6, H1 = 24;
+const H0 = 0, H1 = 24;   // the whole day, 00:00 to 24:00
 const WIN = 63, SHIFT = 28;            // day strip: 9 weeks rendered, moved by 4 weeks near an edge
 const MWIN = 30, MSHIFT = 8;           // month: 30 weeks rendered, moved by 8 weeks
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -73,10 +73,10 @@ export default function CalendarView() {
   useLayoutEffect(applyX);
   const prevCw = useRef(0);   // turned the phone: the same day at the new width
   useLayoutEffect(() => { const el = sc.current; if (guard && el && want.current != null && prevCw.current && cw && prevCw.current !== cw) setLeft(el, Math.round(want.current / prevCw.current) * cw); prevCw.current = cw; }, [cw]);
-  const slide = (to, ms) => {   // our own ease-out slide (phone): stops where a finger catches it
+  const slide = (to, v) => {   // our own ease-out slide (phone): starts at the finger's speed v (px/ms), stops where a finger catches it
     const el = sc.current; if (!el) return;
     const from0 = getLeft(el), d = to - from0; if (Math.abs(d) < 1) { setLeft(el, to); return; }
-    ms = ms || Math.min(380, Math.max(200, Math.abs(d) / (cw || 1) * 140));
+    const ms = v ? Math.min(450, Math.max(200, 3 * Math.abs(d) / Math.max(Math.abs(v), 0.3))) : Math.min(380, Math.max(200, Math.abs(d) / (cw || 1) * 140));
     const t0 = performance.now(), me = {}; anim.current = me;
     const step = t => { if (anim.current !== me) return;
       const k = Math.min(1, (t - t0) / ms); setLeft(el, from0 + d * (1 - Math.pow(1 - k, 3)));
@@ -148,7 +148,7 @@ export default function CalendarView() {
       const i0 = Math.round(g.sl / cw), pos = getLeft(el), quick = t1 - g.t0 < 300 && Math.abs(v) > 0.2 && Math.abs(pos - g.sl) > 10;
       let i = quick ? i0 + (pos > g.sl ? 1 : -1) : Math.round(pos / cw);
       i = Math.max(0, Math.min(span - n, i));
-      slide(i * cw);
+      slide(i * cw, v);
     };
     el.addEventListener('touchstart', start, { passive: true }); el.addEventListener('touchmove', move, { passive: false });
     el.addEventListener('touchend', end, { passive: true }); el.addEventListener('touchcancel', end, { passive: true });
@@ -166,7 +166,7 @@ export default function CalendarView() {
       ticking.current = false; const el = sc.current; if (!el) return;
       const pos = month ? el.scrollTop : getLeft(el), i = Math.round(pos / unit);
       if (month) { const mid = firstOfMonth(addDays(from, (i + 2) * 7 + 3)); if (mid !== focus) setFocus(mid); }
-      else { const f = addDays(from, i); if (f !== focus) setFocus(f); }
+      else if (!busy()) { const f = addDays(from, i); if (f !== focus) setFocus(f); }   // the title follows once the days stand still: no redraw mid-slide
       clearTimeout(idle.current); idle.current = setTimeout(edge, 200);
     });
   }

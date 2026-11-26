@@ -945,6 +945,7 @@ a.join{display:inline-flex;align-items:center;justify-content:center;background:
    moves it), days change by a clear sideways swipe, two fingers zoom (calendar.js) */
 @media (max-width:860px) and (pointer:coarse){
   .cscroll{touch-action:pan-y;scroll-snap-type:none;overflow-x:hidden;overflow-y:auto}
+  .cscroll,.mscroll{overscroll-behavior:none}   /* no rubber band: the top of the calendar can't be pulled down */
 }
 code.cmd{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;color:var(--acc);flex:none;min-width:84px}
 code.cmd{background:none;padding:0}.cell>code.cmd+span{flex:1;min-width:0}
