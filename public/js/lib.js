@@ -48,6 +48,7 @@ export async function load(what = ['projects', 'tasks', 'plan']) {
   if (what.includes('tasks')) once('tasks', async () => S.set({ tasks: await api('/api/tasks') }));
   if (what.includes('plan')) once('plan', async () => { const now = Date.now(), from = startOfDay(now) - 864e5; S.set({ plan: await api(`/api/plan?from=${from}&to=${from + 16 * 864e5}`) }); });
   if (what.includes('accounts')) once('accounts', async () => S.set({ accounts: await api('/api/accounts') }));
+  if (what.includes('requests')) once('requests', async () => S.set({ requests: await api('/api/requests') }));
   await Promise.all(jobs).catch(e => { if (S.state.me !== null) toast(e.message); });   // no toast on the sign-in screen
 }
 // live updates from the server (other devices, partner, calendar sync)
@@ -59,11 +60,11 @@ export function connectStream() {
     const { what } = JSON.parse(e.data);
     if (what === 'hello') return S.set({ sync: 'live' });
     clearTimeout(debounce);
-    debounce = setTimeout(() => load(what === 'sync' ? ['plan', 'tasks', 'accounts', 'projects'] : what === 'timer' || what === 'plan' ? ['plan'] : ['plan', 'tasks', 'projects']), 250);
+    debounce = setTimeout(() => load(what === 'sync' ? ['plan', 'tasks', 'accounts', 'projects'] : what === 'requests' ? ['requests'] : what === 'timer' || what === 'plan' ? ['plan'] : ['plan', 'tasks', 'projects']), 250);
   };
   es.onerror = () => S.set({ sync: 'offline – reconnecting' });
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.state.me) load(['plan', 'tasks']); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.state.me) load(['plan', 'tasks', 'requests']); });
 
 // ---------- time + format ----------
 export const startOfDay = ms => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return +d; };

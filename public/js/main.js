@@ -1,4 +1,4 @@
-import { html, render, useState, useEffect, useRef, S, useStore, api, post, load, connectStream, toast, Avatar, openModal } from './lib.js';
+import { html, render, useState, useEffect, useRef, S, useStore, api, post, load, connectStream, toast, Avatar, openModal, go } from './lib.js';
 import NowView, { NowStats } from './now.js';
 import CalendarView, { newEvent } from './calendar.js';
 import { newFlexible } from './eventsheet.js';
@@ -135,6 +135,7 @@ function Shell() {
       <div class="top"><button class="icon" title="Sidebar" onClick=${toggle}>${I('menu', 20)}</button><h1>${title}</h1>${page === 'now' && html`<${NowStats}/>`}
         <div class="r">${page === 'project' && html`<${FilesButton} project=${st.projects.find(x => x.id === +r[1])}/>`}${!['settings', 'admin', 'setup'].includes(page) && html`<button class="pri newtask" title="New Task (N)" onClick=${() => newMenu(page === 'project' ? { project_id: +r[1] } : {})}>${I('plus', 22, { w: 2 })}<span class="lbl">New</span></button>`}</div></div>
       <${Pull}/>
+      <${Requests}/>
       <div class=${'content' + (page === 'calendar' ? ' fixed' : '')}>${view}</div>
     </div>
     <div class="tabbar">${NAV.map(([k, ic, l]) => html`<a href=${'#/' + k} class=${page === k ? 'on' : ''}>${I(ic, 22)}${l}</a>`)}
@@ -176,6 +177,15 @@ function Pull() {
   return html`<div class="ptr" ref=${ind} aria-hidden="true"><i></i></div>`;
 }
 
+// someone asked you to join their project (by your ID): accept or decline
+function Requests() {
+  const L = S.state.requests || [];
+  if (!L.length) return null;
+  const answer = async (r, accept) => { try { const x = await post('/api/requests/' + r.id, { accept }); await load(['requests', 'boot', 'projects', 'tasks', 'plan']); if (x.joined) go('#/project/' + x.joined); } catch (e) { toast(e.message); } };
+  return html`<div class="reqs">${L.map(r => html`<div class="req">${I('people', 18)}<span class="grow"><b>${r.from_name}</b> invites you to <b>${r.project}</b></span>
+    <button onClick=${() => answer(r, false)}>Decline</button><button class="pri" onClick=${() => answer(r, true)}>Accept</button></div>`)}</div>`;
+}
+
 function App() {
   const st = useStore();
   if (st.me === undefined) return html`<div class="boot">Loading…</div>`;
@@ -191,7 +201,7 @@ async function start() {
   if (!S.state.me) { S.set({ me: null }); return; }
   if (S.state.must2fa) return;
   const next = sessionStorage.getItem('next'); if (next) { sessionStorage.removeItem('next'); location.replace(next); return; }
-  await load(['projects', 'tasks', 'plan', 'accounts']);
+  await load(['projects', 'tasks', 'plan', 'accounts', 'requests']);
   connectStream();
   const m = location.hash.match(/^#\/task\/(\d+)/); if (m) { location.hash = '#/tasks'; openTask(+m[1]); }
   // first login: go through the setup assistant

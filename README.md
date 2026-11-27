@@ -84,7 +84,7 @@ Push (desktop, phone, Apple Watch), e-mail or both, set separately for task star
 
 ## Home Assistant and a tablet on the wall
 
-The [Home Assistant integration](https://github.com/Esondor/ha-smart-calendar) (HACS) adds a Smart Calendar page to the Home Assistant sidebar, meant for a tablet in the kitchen or hallway. Everyone in the household can see what is next, tick chores off, start them, push them to later or add a new one. Chores are grouped by place. The integration also brings sensors (next task, open tasks, waiting) and an event service, for example to create "empty the washing machine" when the washer is done.
+The [Home Assistant integration](https://github.com/Esondor/ha-smart-calendar) (HACS) adds a Smart Calendar page to the Home Assistant sidebar, meant for a tablet in the kitchen or hallway. Everyone in the shared chores project taps their own button to see what is next for them, tick chores off, start them, push them to later or add a new one. It shows only that project, nothing else of anyone's calendar. Chores are grouped by place. The integration also brings sensors (next task, open tasks, waiting) and an event service, for example to create "empty the washing machine" when the washer is done.
 
 <img src="docs/wall.png" alt="Tablet view in Home Assistant: the time, the household members, the next chore with Start, Done and Later, today's list and chores grouped by place" width="820">
 
@@ -92,7 +92,7 @@ The [Home Assistant integration](https://github.com/Esondor/ha-smart-calendar) (
 
 - **Auto-scheduling.** Tasks have a duration, priority, deadline, earliest start and minimum block size. The server fills them into your free time between Google, Exchange and fixed blocks, and re-plans after every change and every minute.
 - **Chores that don't pile up.** Repeat a task daily, weekly or monthly, optionally every N days, on preferred weekdays or at a time of day. Each round is planned before it ends. A missed round doesn't stack up; it just makes the current round urgent. In shared projects you can **take turns**.
-- **Shared projects (kanban).** Add other users to a project. Everyone sees the board, assigned tasks land in the assignee's own calendar, and partners get a push notification when something is done.
+- **Shared projects (kanban).** Invite someone by their ID (shown in the Share dialog and in Settings): they get a push notification and accept or decline. Everyone sees the board, assigned tasks land in the assignee's own calendar, and partners get a push notification when something is done. The eye button shows when the others are planned to work on the project's tasks; their calendars stay private.
 - **Focus and writing views.** The *Now* page (focus card, timer, Break, Lunch, Pulled away, Block time, Research, today's timeline, coming days, Later list, projected finish) and the *Writing* view (red thread → chapter → sections → sub-chapters with points) are built in.
 - **Google Calendar, two-way.** Planned blocks are written into a calendar of your choice, so they also show up in Apple Calendar through your Google account. Changes you make there come back:
   - **move** a block → it's pinned there and everything else is re-planned around it
@@ -223,7 +223,7 @@ Per account in Settings → Calendars:
 
 - **Locations.** Give chores a location (Basement, Kitchen, …). When one task at a location is planned, other due tasks at the same place are scheduled right after it. The wall display lists them as *Also in Basement*.
 - **Follow-ups.** In a task's *More Options → Then*, add steps that are created when the task is done, either after a delay or when an event arrives. Example: *Start washer* → then *Move laundry to dryer* when `washer_done` (or after 120 min) → then *Fold laundry*.
-- **Wall display.** Administration → Displays → New Display (choose the people), then open the link on the tablet. It shows a person switcher, the current task with Done/Later, tasks grouped by room, waiting follow-ups and what's done today. It shows projects with *Wall display* switched on, which by default are the projects using personal hours.
+- **Wall display.** Switch on *Wall display* in the shared chores project's settings. Administration → Displays → New Display, then open the link on the tablet (or use Home Assistant). It shows a button for every member of that project, the current task with Done/Later, tasks grouped by room, waiting follow-ups and what's done today: only the tasks of that project. It is the one place where everyone sees everyone's tasks.
 
 ### Home Assistant
 

@@ -9,7 +9,7 @@ import { serverConf, setServerConf, baseUrl } from './serverconf.js';
 import { recordFailure } from './policy.js';
 import { getPlan, parseKey, calendarEvents, joinLink, busyOf, shownBusy, markDirty, winOf } from './planner.js';
 import { hiddenEvents } from './conflicts.js';
-import { taskById, membersOf, projectIdsFor, projectPlaces, DEFAULT_PLACES } from './models.js';
+import { taskById, membersOf, projectIdsFor, projectPlaces, isMember, DEFAULT_PLACES } from './models.js';
 import * as A from './actions.js';
 import { notify } from './notify.js';
 import { bus, notifyUsers } from './bus.js';
@@ -33,12 +33,20 @@ function tokenFrom(req, kind) {
   if (!t.last_used || Date.now() - t.last_used > 60000) run('UPDATE api_tokens SET last_used = ? WHERE id = ?', Date.now(), t.id);
   return { t, u };
 }
+// the wall's project(s): the display owner's projects with "Wall display" on (else the one with places). This is the one
+// place where everyone sees everyone's tasks, and only the tasks of these projects
+export function wallProjects(ownerId) {
+  const ps = projectIdsFor(ownerId).map(id => get('SELECT * FROM projects WHERE id = ? AND archived = 0', id)).filter(Boolean);
+  const on = ps.filter(p => J(p.meta, {}).wall === true);
+  return (on.length ? on : ps.filter(p => projectPlaces(p))).map(p => p.id);
+}
 const household = uid => [...new Set([uid, ...all('SELECT DISTINCT y.user_id FROM project_members x JOIN project_members y ON x.project_id = y.project_id WHERE x.user_id = ?', uid).map(r => r.user_id)])];
 
 // ---------- day view data shared by the menu bar, Home Assistant and the wall ----------
-function dayData(uid, { householdOnly = false } = {}) {
+function dayData(uid, { only = null } = {}) {
   const p = getPlan(uid), now = Date.now(), end = dayStart(addDays(isoDate(now), 1));
-  const isHome = u => { if (!householdOnly) return true; const w = J(get('SELECT meta FROM projects WHERE id = ?', u.t.project_id)?.meta, {}).wall; return w === true || (w !== false && u.t.p_schedule === 'personal'); };
+  const isHome = u => !only || only.includes(u.t.project_id);
+  const inWall = pid => !only || only.includes(pid);
   const item = (u, b) => ({ key: u.key, taskId: u.t.id, period: u.period ?? 0, title: u.t.title, project: u.t.p_name, color: u.t.p_color, location: u.t.location || null,
     duration: u.t.duration, assignee: u.t.assignee_id, rotate: u.t.assign_mode === 'rotate', start: b?.s ?? null, end: b?.e ?? null, overdue: !!u.overdue || !!(p.info[u.key]?.late), recur: !!u.t.recur, followup: !!u.t.source_task });
   const today = [], seen = new Set();
@@ -53,9 +61,9 @@ function dayData(uid, { householdOnly = false } = {}) {
   const also = Object.values(p.units).filter(u => !seen.has(u.key) && !todayIds.has(u.t.id) && u.t.auto && u.t.location && locs.has(u.t.location.toLowerCase()) && (u.earliest || 0) < now + 7 * 864e5 && isHome(u))
     .map(u => item(u, p.blocks.find(b => b.key === u.key))).filter((x, i, a) => a.findIndex(y => y.taskId === x.taskId) === i);
   const waiting = all(`SELECT t.id, t.title, t.wait_event, t.wait_until, t.location FROM tasks t JOIN project_members m ON m.project_id = t.project_id AND m.user_id = ?
-    WHERE t.status != 'done' AND t.wait_event IS NOT NULL AND (t.wait_until IS NULL OR t.wait_until > ?) AND (t.assignee_id = ? OR t.assignee_id IS NULL)`, uid, now, uid);
-  const doneToday = all(`SELECT t.id, t.title, t.location, COALESCE(o.at, t.done_at) AS at FROM tasks t LEFT JOIN occurrences o ON o.task_id = t.id AND o.by = ? AND o.at >= ?
-    WHERE ((t.done_by = ? AND t.done_at >= ?) OR o.task_id IS NOT NULL)`, uid, dayStart(isoDate(now)), uid, dayStart(isoDate(now)));
+    WHERE t.status != 'done' AND t.wait_event IS NOT NULL AND (t.wait_until IS NULL OR t.wait_until > ?) AND (t.assignee_id = ? OR t.assignee_id IS NULL)`, uid, now, uid).filter(t => inWall(get('SELECT project_id FROM tasks WHERE id = ?', t.id)?.project_id));
+  const doneToday = all(`SELECT t.id, t.title, t.location, t.project_id, COALESCE(o.at, t.done_at) AS at FROM tasks t LEFT JOIN occurrences o ON o.task_id = t.id AND o.by = ? AND o.at >= ?
+    WHERE ((t.done_by = ? AND t.done_at >= ?) OR o.task_id IS NOT NULL)`, uid, dayStart(isoDate(now)), uid, dayStart(isoDate(now))).filter(t => inWall(t.project_id));
   // every open chore (next occurrence each), for the overview by place
   const chores = [], seenT = new Set();
   for (const u of Object.values(p.units).sort((a, b) => (p.info[a.key]?.first || 9e15) - (p.info[b.key]?.first || 9e15))) {
@@ -64,8 +72,8 @@ function dayData(uid, { householdOnly = false } = {}) {
     if (i.first && i.first > now + 14 * 864e5) continue;
     seenT.add(u.t.id); chores.push({ ...item(u, i.first ? { s: i.first, e: i.end } : null), late: !!i.late });
   }
-  const act = get('SELECT a.task_id, a.period, a.since FROM active a WHERE a.user_id = ?', uid);
-  return { now, today, also, waiting, doneToday, chores, active: act || null };
+  const act = get('SELECT a.task_id, a.period, a.since, t.project_id FROM active a JOIN tasks t ON t.id = a.task_id WHERE a.user_id = ?', uid);
+  return { now, today, also, waiting, doneToday, chores, active: act && inWall(act.project_id) ? { task_id: act.task_id, period: act.period, since: act.since } : null };
 }
 
 // ---------- agenda for the Mac menu bar: appointments, planned tasks and breaks ----------
@@ -235,32 +243,34 @@ export default async function extRoutes(app) {
 
   // ----- wall display (Bearer display token) -----
   const wallUser = (req) => {
-    const { t } = tokenFrom(req, 'display'), fixed = J(t.users, []), ids = fixed.length ? fixed : household(t.user_id);
+    const { t } = tokenFrom(req, 'display'), pids = wallProjects(t.user_id), fixed = J(t.users, []);
+    const members = [...new Set(pids.flatMap(pid => membersOf(pid).map(m => m.id)))];
+    const ids = fixed.length ? fixed.filter(id => members.includes(id)) : members;
     const uid = +req.params.uid; if (req.params.uid && !ids.includes(uid)) throw httpErr(403, 'Not on this display');
-    return { t, ids, uid };
+    // a task of the wall's projects only
+    const task = id => { const x = get('SELECT project_id FROM tasks WHERE id = ?', +id); if (!x || !pids.includes(x.project_id)) throw httpErr(404, 'Not found'); return x; };
+    return { t, ids, uid, pids, task };
   };
-  app.get('/api/wall', async req => { const { t, ids } = wallUser(req); const places = [...new Set(ids.flatMap(id => projectIdsFor(id)).map(pid => get('SELECT name, meta FROM projects WHERE id = ? AND archived = 0', pid)).filter(Boolean).flatMap(p => projectPlaces(p) || []))];
+  app.get('/api/wall', async req => { const { t, ids, pids } = wallUser(req); const places = [...new Set(pids.map(pid => get('SELECT name, meta FROM projects WHERE id = ?', pid)).filter(Boolean).flatMap(p => projectPlaces(p) || []))];
     return { places: places.length ? places : DEFAULT_PLACES, bg: J(get('SELECT settings FROM users WHERE id = ?', t.user_id)?.settings, {}).view?.bg || 'dusk', users: ids.map(id => get('SELECT id, name, color FROM users WHERE id = ? AND disabled = 0', id)).filter(Boolean) }; });
-  app.get('/api/wall/:uid', async req => { const { uid } = wallUser(req); return dayData(uid, { householdOnly: true }); });
+  app.get('/api/wall/:uid', async req => { const { uid, pids } = wallUser(req); return dayData(uid, { only: pids }); });
   app.post('/api/wall/:uid/done', async req => {
-    const { uid } = wallUser(req), tid = +req.body?.task;
-    if (!projectIdsFor(uid).includes(get('SELECT project_id FROM tasks WHERE id = ?', tid)?.project_id)) throw httpErr(404, 'Not found');
+    const { uid, task } = wallUser(req), tid = +req.body?.task; task(tid);
     A.setDone(uid, tid, +(req.body?.period || 0), true, 'wall'); return { ok: true };
   });
   app.post('/api/wall/:uid/start', async req => {
-    const { uid } = wallUser(req), tid = +req.body?.task;
-    if (!projectIdsFor(uid).includes(get('SELECT project_id FROM tasks WHERE id = ?', tid)?.project_id)) throw httpErr(404, 'Not found');
+    const { uid, task } = wallUser(req), tid = +req.body?.task; task(tid);
     A.startTimer(uid, tid, +(req.body?.period || 0)); return { ok: true };
   });
   app.post('/api/wall/:uid/stop', async req => { const { uid } = wallUser(req); A.stopTimer(uid); return { ok: true }; });
   // add a chore from the display: into the household project (the one with places), for the chosen person
   app.post('/api/wall/:uid/tasks', async req => {
-    const { uid, ids } = wallUser(req), b = req.body || {};
+    const { uid, ids, pids } = wallUser(req), b = req.body || {};
     const title = String(b.title || '').trim().slice(0, 200); if (!title) throw httpErr(400, 'Title missing');
     const who = ids.includes(+b.assignee) ? +b.assignee : uid;
-    const ps = projectIdsFor(who).map(pid => get('SELECT * FROM projects WHERE id = ? AND archived = 0', pid)).filter(Boolean);
-    const p = ps.find(p => projectPlaces(p)) || ps.find(p => J(p.meta, {}).wall) || ps.find(p => p.schedule === 'personal');
-    if (!p) throw httpErr(400, 'No household project');
+    const ps = pids.filter(pid => isMember(who, pid)).map(pid => get('SELECT * FROM projects WHERE id = ?', pid)).filter(Boolean);
+    const p = ps.find(p => projectPlaces(p)) || ps[0];
+    if (!p) throw httpErr(400, 'No wall project');
     const now = Date.now(), dur = Math.max(5, Math.min(480, +b.duration || 15));
     const id = Number(run(`INSERT INTO tasks(project_id, title, duration, location, assignee_id, created_by, created_at, updated_at, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       p.id, title, dur, String(b.location || '').slice(0, 60) || null, who, uid, now, now, (get('SELECT MAX(sort) AS m FROM tasks WHERE project_id = ?', p.id).m || 0) + 1).lastInsertRowid);
@@ -268,20 +278,16 @@ export default async function extRoutes(app) {
   });
   // hand a chore to someone else on this display
   app.post('/api/wall/:uid/assign', async req => {
-    const { ids } = wallUser(req), tid = +req.body?.task, to = +req.body?.user;
-    const t = get('SELECT project_id FROM tasks WHERE id = ?', tid);
-    if (!t || !ids.includes(to) || !projectIdsFor(to).includes(t.project_id)) throw httpErr(404, 'Not found');
+    const { ids, task } = wallUser(req), tid = +req.body?.task, to = +req.body?.user, t = task(tid);
+    if (!ids.includes(to) || !isMember(to, t.project_id)) throw httpErr(404, 'Not found');
     run(`UPDATE tasks SET assignee_id = ?, assign_mode = 'fixed', updated_at = ? WHERE id = ?`, to, Date.now(), tid); A.touchProject(t.project_id); return { ok: true };
   });
   app.post('/api/wall/:uid/later', async req => {
-    const { uid } = wallUser(req), tid = +req.body?.task;
-    if (!projectIdsFor(uid).includes(get('SELECT project_id FROM tasks WHERE id = ?', tid)?.project_id)) throw httpErr(404, 'Not found');
+    const { uid, task } = wallUser(req), tid = +req.body?.task; task(tid);
     A.postpone(uid, tid, +(req.body?.period || 0), Date.now() + 3 * 3600e3); return { ok: true };
   });
   app.post('/api/wall/:uid/ready', async req => {
-    const { uid } = wallUser(req), tid = +req.body?.task;
-    const t = get('SELECT project_id FROM tasks WHERE id = ?', tid);
-    if (!t || !projectIdsFor(uid).includes(t.project_id)) throw httpErr(404, 'Not found');
+    const { task } = wallUser(req), tid = +req.body?.task, t = task(tid);
     run('UPDATE tasks SET wait_event = NULL, wait_until = ? WHERE id = ?', Date.now(), tid); A.touchProject(t.project_id); return { ok: true };
   });
 }

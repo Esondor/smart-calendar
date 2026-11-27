@@ -27,7 +27,7 @@ export function CalendarSelect({ value, onChange, name }) {
 }
 export async function projectSettings(p) {
   const r = await openModal(close => { const B = () => {
-    const [f, setF] = useState(p ? { ...p, columns: p.columns.join(', '), wall: p.meta?.wall ?? p.schedule === 'personal', ordered: p.meta?.ordered ?? p.kind === 'outline', places: (p.places || []).join(', '), levels: (p.meta?.levels || []).join(', '), cal: String(S.state.settings?.plan?.projectCalendars?.[p.id] || ''), shared: !!p.meta?.sharedCal } : { name: '', color: '#1971c2', kind: 'board', schedule: 'personal', columns: 'To do, In progress, Done', target_date: '', wall: true, ordered: false });
+    const [f, setF] = useState(p ? { ...p, columns: p.columns.join(', '), wall: p.meta?.wall ?? (p.places || []).length > 0, ordered: p.meta?.ordered ?? p.kind === 'outline', places: (p.places || []).join(', '), levels: (p.meta?.levels || []).join(', '), cal: String(S.state.settings?.plan?.projectCalendars?.[p.id] || ''), shared: !!p.meta?.sharedCal } : { name: '', color: '#1971c2', kind: 'board', schedule: 'personal', columns: 'To do, In progress, Done', target_date: '', wall: true, ordered: false });
     const set = x => setF(y => ({ ...y, ...x })), sch = Object.keys(S.state.settings?.hours || {});
     return html`<div class="modal sm"><h3>${p ? 'Project' : 'New Project'}</h3>
       <div style="display:grid;gap:10px">
@@ -67,12 +67,13 @@ async function share(p) {
         ${m.role !== 'owner' && (p.owner_id === S.state.me.id || m.id === S.state.me.id) ? html`<button class="sk" onClick=${() => close({ remove: m.id })}>Remove</button>` : ''}</li>`)}</ul>
       ${others.length ? html`<div class="row" style="margin-top:10px"><select class="grow" value=${v} onChange=${e => setV(e.target.value)}><option value="">Add Person</option>${others.map(o => html`<option value=${o.id}>${o.name} (@${o.username})</option>`)}</select>
         <button class="pri" disabled=${!v} onClick=${() => close({ add: +v })}>Add</button></div>` : ''}
-      <div class="row" style="margin-top:10px"><input type="text" class="grow" placeholder="Username" value=${n} onInput=${e => setN(e.target.value)} onKeyDown=${e => e.key === 'Enter' && n.trim() && close({ username: n.trim() })}/>
-        <button disabled=${!n.trim()} onClick=${() => close({ username: n.trim() })}>Add</button></div>
+      <div class="row" style="margin-top:10px"><input type="text" class="grow" placeholder="ID" value=${n} onInput=${e => setN(e.target.value)} onKeyDown=${e => e.key === 'Enter' && n.trim() && close({ username: n.trim() })}/>
+        <button disabled=${!n.trim()} onClick=${() => close({ username: n.trim() })}>Invite</button></div>
+      <div class="cell" style="margin-top:8px;padding:0 2px"><span class="hint grow">Your ID</span><span style="user-select:all">${S.state.me.username}</span></div>
       <div class="box" style="margin:14px 0 0"><${InviteBox} project=${p}/></div>
       <div class="acts"><button onClick=${() => close(null)}>Close</button></div></div>`; }; return html`<${B}/>`; });
   if (!u) return;
-  try { if (u.add) await post(`/api/projects/${p.id}/members`, { user_id: u.add }); if (u.username) await post(`/api/projects/${p.id}/members`, { username: u.username }); if (u.remove) await del(`/api/projects/${p.id}/members/${u.remove}`); await load(['boot', 'projects', 'tasks', 'plan']); } catch (e) { toast(e.message); }
+  try { if (u.add) await post(`/api/projects/${p.id}/members`, { user_id: u.add }); if (u.username) { const r = await post(`/api/projects/${p.id}/members`, { username: u.username }); if (r.requested) toast('Invitation sent'); } if (u.remove) await del(`/api/projects/${p.id}/members/${u.remove}`); await load(['boot', 'projects', 'tasks', 'plan']); } catch (e) { toast(e.message); }
 }
 
 function Card({ t, cols, onDragStart }) {

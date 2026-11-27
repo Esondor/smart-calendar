@@ -369,6 +369,16 @@ const MIGRATIONS = [
     created_at INTEGER NOT NULL, last_used INTEGER, ip TEXT
   );
   `,
+  `
+  CREATE TABLE share_requests (                         -- "join my project?": asked by ID, the other person accepts or declines
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    from_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    to_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    UNIQUE(project_id, to_id)
+  );
+  `,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

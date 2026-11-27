@@ -172,14 +172,40 @@ export default async function apiRoutes(app) {
   });
   app.post('/api/projects/:id/members', async req => {
     const pid = needProject(req.user.id, req.params.id);
-    // by id only people you already know (see contactsOf); anyone else by their exact username
+    // people you already know (see contactsOf) are added; anyone else is asked by their ID (username) and accepts or declines
     const byId = int(req.body?.user_id, -1), name = str(req.body?.username, 40).trim().toLowerCase().replace(/^@/, '');
-    const u = byId > 0 ? (contactsOf(req.user.id).some(c => c.id === byId) ? get('SELECT id, name FROM users WHERE id = ? AND disabled = 0', byId) : null)
-      : name ? get('SELECT id, name FROM users WHERE username = ? AND disabled = 0', name) : null;
+    if (name) {
+      const to = get('SELECT id, name FROM users WHERE username = ? AND disabled = 0', name);
+      if (!to) throw httpErr(404, 'No one with this ID');
+      if (isMember(to.id, pid)) throw httpErr(409, `${to.name} is already in this project`);
+      run('INSERT OR IGNORE INTO share_requests(project_id, from_id, to_id, created_at) VALUES (?, ?, ?, ?)', pid, req.user.id, to.id, Date.now());
+      const pname = get('SELECT name FROM projects WHERE id = ?', pid).name;
+      notify(to.id, 'partner', { title: `${req.user.name} invites you to “${pname}”`, body: 'Accept or decline in Smart Calendar.', url: '/#/requests', tag: 'share-' + pid }).catch(() => {});
+      notifyUsers([to.id], 'requests');
+      audit(req, 'project.ask', pname, to.id);
+      return { requested: true, members: membersOf(pid) };
+    }
+    const u = byId > 0 && contactsOf(req.user.id).some(c => c.id === byId) ? get('SELECT id, name FROM users WHERE id = ? AND disabled = 0', byId) : null;
     if (!u) throw httpErr(404, 'No such user');
     run(`INSERT OR IGNORE INTO project_members(project_id, user_id, role) VALUES (?, ?, 'editor')`, pid, u.id);
     logActivity(pid, req.user.id, `Shared with ${u.name}`); audit(req, 'project.share', get('SELECT name FROM projects WHERE id = ?', pid).name, u.id); A.touchProject(pid);
     return membersOf(pid);
+  });
+  // requests to join a project: yours to answer
+  app.get('/api/requests', async req => all(`SELECT r.id, r.created_at, p.name AS project, u.name AS from_name, u.username AS from_id FROM share_requests r
+    JOIN projects p ON p.id = r.project_id JOIN users u ON u.id = r.from_id WHERE r.to_id = ? ORDER BY r.id`, req.user.id));
+  app.post('/api/requests/:id', async req => {
+    const r = get('SELECT * FROM share_requests WHERE id = ? AND to_id = ?', +req.params.id, req.user.id); if (!r) throw httpErr(404, 'Not found');
+    run('DELETE FROM share_requests WHERE id = ?', r.id);
+    const pname = get('SELECT name FROM projects WHERE id = ?', r.project_id)?.name;
+    if (req.body?.accept && pname != null && isMember(r.from_id, r.project_id)) {
+      run(`INSERT OR IGNORE INTO project_members(project_id, user_id, role) VALUES (?, ?, 'editor')`, r.project_id, req.user.id);
+      logActivity(r.project_id, req.user.id, 'Joined'); A.touchProject(r.project_id);
+      notify(r.from_id, 'partner', { title: `${req.user.name} joined “${pname}”`, body: '', url: '/#/project/' + r.project_id }).catch(() => {});
+      audit(req, 'project.join', pname, req.user.id);
+      return { joined: r.project_id };
+    }
+    return { declined: true };
   });
   app.delete('/api/projects/:id/members/:uid', async req => {
     const pid = needProject(req.user.id, req.params.id), p = get('SELECT owner_id FROM projects WHERE id = ?', pid);

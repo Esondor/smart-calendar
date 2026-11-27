@@ -250,7 +250,7 @@ function Account() {
   return html`<div class="box">
     <div class="cell"><span>Name</span><input type="text" value=${me.name} onChange=${async e => { S.set({ me: await patch('/api/me', { name: e.target.value }) }); load(['boot']); }}/>
       <input type="color" title="Color" value=${me.color} onChange=${async e => { S.set({ me: await patch('/api/me', { color: e.target.value }) }); load(['boot']); }}/></div>
-    <div class="cell"><span>Username</span><span class="hint">${me.username}</span></div>
+    <div class="cell"><span>ID</span><span class="hint">${me.username}</span></div>
     <${Passkeys}/>
     <div class="cell"><span>Password</span><button class="ghost" onClick=${() => setPw(pw ? null : { current: '', password: '' })}>Change</button></div>
     ${pw && html`<div class="row" style="padding:0 0 10px"><input type="password" placeholder="Current" autocomplete="current-password" value=${pw.current} onInput=${e => setPw({ ...pw, current: e.target.value })}/>

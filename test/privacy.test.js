@@ -41,6 +41,28 @@ test('only people you know are listed and can be picked; others by exact usernam
   const boot = await as(a, 'GET', '/api/bootstrap'); assert.ok(boot.j.users, JSON.stringify(boot.j).slice(0, 300));
   assert.deepEqual(boot.j.users.map(u => u.id).sort(), [a, b].sort());
   assert.equal((await as(a, 'POST', `/api/projects/${shared}/members`, { user_id: c })).code, 404);
+  // by ID: Cleo is asked, not added; she accepts and is in
   const r = await as(a, 'POST', `/api/projects/${shared}/members`, { username: 'cleo' });
-  assert.equal(r.code, 200); assert.ok(r.j.some(m => m.id === c));
+  assert.equal(r.j.requested, true); assert.ok(!r.j.members.some(m => m.id === c));
+  assert.equal((await as(a, 'POST', `/api/projects/${shared}/members`, { username: 'nobody' })).code, 404);
+  const reqs = (await as(c, 'GET', '/api/requests')).j;
+  assert.equal(reqs.length, 1); assert.equal(reqs[0].project, 'Home'); assert.equal(reqs[0].from_name, 'Anna');
+  assert.equal((await as(b, 'POST', `/api/requests/${reqs[0].id}`, { accept: true })).code, 404, 'only Cleo answers');
+  assert.equal((await as(c, 'POST', `/api/requests/${reqs[0].id}`, { accept: true })).j.joined, shared);
+  assert.ok(get('SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?', shared, c));
+  assert.equal((await as(c, 'GET', '/api/requests')).j.length, 0);
+});
+
+test('the wall: only the wall project, every member\'s button, only its tasks', async () => {
+  const { default: extRoutes, newToken } = await import('../server/ext.js');
+  const w = Fastify(); await w.register(extRoutes); await w.ready();
+  run(`UPDATE projects SET meta = '{"wall":true}' WHERE id = ?`, shared);
+  const tok = newToken(a, 'display', 'Home Assistant', []);
+  const call = url => w.inject({ method: 'GET', url, headers: { authorization: 'Bearer ' + tok } }).then(r => ({ code: r.statusCode, j: r.json() }));
+  const wall = (await call('/api/wall')).j;
+  assert.deepEqual(wall.users.map(u => u.id).sort(), [a, b, c].sort(), 'everyone in the wall project');
+  const ben = (await call(`/api/wall/${b}`)).j;
+  const titles = [...ben.chores, ...ben.today].map(x => x.title);
+  assert.ok(titles.includes('Paint the hall')); assert.ok(!titles.includes('Secret thing'), 'not his other projects');
+  await w.close();
 });

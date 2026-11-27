@@ -69,6 +69,7 @@ function App() {
   const act = async (what, item) => { try { await call(`/api/wall/${uid}/${what}`, { task: item.taskId ?? item.id, period: item.period || 0 }); if (what === 'done' || what === 'later') choose(null); await load(); } catch { setOff(true); } };
 
   if (!KEY || err) return html`<div class="w"><div class="w-empty">${I('shield', 44)}<div>${err || 'No display key.'}</div></div></div>`;
+  if (w && !w.users.length) return html`<div class="w"><div class="w-empty">${I('people', 44)}<div>No wall project</div></div></div>`;
   if (!w || !d) return html`<div class="w"></div>`;
   const now = Date.now(), all = d.chores || [];
   const running = d.active && all.find(x => x.taskId === d.active.task_id);
