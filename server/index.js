@@ -53,6 +53,7 @@ app.addHook('onRequest', async (req, reply) => {
   if (req.url === '/api/google/push') { delete req.headers['content-type']; return; }   // no body; the channel token is checked in the route
   if (req.url.startsWith('/api/vikunja/push/')) return;                                   // signed body, checked in the route
   if (req.url.startsWith('/api/ext/') || req.url.startsWith('/api/wall')) return;   // token auth inside the routes, no cookies → no CSRF
+  if (req.url.startsWith('/api/book/')) { if (req.method !== 'GET' && req.headers['x-sc'] !== '1') return reply.code(403).send({ error: 'Missing request header' }); return; }   // public booking page: the link's token
   const p = req.url.split('?')[0];
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers['x-sc'] !== '1') return reply.code(403).send({ error: 'Missing request header' });
   if (OPEN.has(p) || p.startsWith('/api/auth/invite/')) return;
@@ -95,6 +96,7 @@ app.addHook('onSend', async (req, reply, payload) => {
 app.get('/wall', (req, reply) => reply.sendFile('wall.html'));
 await app.register(authRoutes);
 await app.register(apiRoutes);
+await app.register((await import('./booking-routes.js')).default);
 await app.register(adminRoutes);
 await app.register(extRoutes);
 await app.register(passkeyRoutes);

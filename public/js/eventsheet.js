@@ -215,13 +215,13 @@ export const SwitchN = ({ opts, value, set }) => { const i = Math.max(0, opts.fi
 export const hoursOpts = () => [...Object.keys(S.state.settings?.hours || { work: 1, personal: 1 }).map(n => [n, cap(n)]), ['all', 'All day']];
 export const Switch2 = ({ a, b, right, set }) => html`<button type="button" class=${'sw2' + (right ? ' r' : '')} onClick=${() => set(!right)}><span>${a}</span><span>${b}</span></button>`;
 export const DateTime = ({ d, t, setD, setT, empty }) => html`<div class="dt"><input type="date" value=${d} onInput=${e => setD(e.target.value)}/>${!empty && html`<div class="tm"><input class="t24" value=${t} placeholder="--:--" onChange=${e => setT(n24(e.target.value) || '')}/></div>`}</div>`;
-export async function newAppointment(at = null, end = null) {
+export async function newAppointment(at = null, end = null, pre = {}) {
   const cals = googleCals(), names = Object.keys(S.state.settings?.hours || { work: 1, personal: 1 });
   const t0 = at || Math.ceil(Date.now() / 300000) * 300000, t1 = end && end > t0 ? end : t0 + 3600e3;
   const r = await openModal(close => { const B = () => {
-    const [f, setF] = useState({ title: '', plan: !cals.length, sd: isoDate(t0), st: hm(t0), ed: isoDate(t1), et: hm(t1), dd: '', dt: '',
+    const [f, setF] = useState({ title: pre.title || '', plan: !cals.length, sd: isoDate(t0), st: hm(t0), ed: isoDate(t1), et: hm(t1), dd: '', dt: '',
       all_day: false, block: true, minutes: end ? Math.round((t1 - t0) / 60000) : 30, when: (at && hoursAt(at)) || (names.includes('personal') ? 'personal' : names[0]), win: false, days: [1, 2, 3, 4, 5], ws: '08:00', we: '11:00',
-      priority: 2, cal: cals.length ? String((cals.find(c => String(c.id) === lastUsed('cal')) || cals.find(c => c.use_busy) || cals[0]).id) : '', location: '', travel: 0, notes: '' });
+      priority: 2, cal: cals.length ? String((cals.find(c => String(c.id) === lastUsed('cal')) || cals.find(c => c.use_busy) || cals[0]).id) : '', location: pre.place || '', travel: 0, notes: pre.notes || '' });
     const set = x => setF({ ...f, ...x }), plan = f.plan;
     // moving the start keeps the length; the end never before the start
     const setStart = x => { const n = { ...f, ...x }; if (!plan) { const len = atTime(f.ed, f.et || '00:00') - atTime(f.sd, f.st || '00:00'), e = atTime(n.sd, n.st || '00:00') + Math.max(len, 15 * 60000); n.ed = isoDate(e); n.et = hm(e); } setF(n); };

@@ -394,6 +394,29 @@ const MIGRATIONS = [
   `
   ALTER TABLE tasks ADD COLUMN archived_at INTEGER;     -- done and put away: no longer in Done, only in the board's Archive
   `,
+  `
+  CREATE TABLE inbox (                                  -- the notification center: what needs an answer or should be seen
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,                                 -- booking (a guest asks for a time) · hold (booked for you by a project member) · info
+    title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '{}', at INTEGER NOT NULL
+  );
+  CREATE INDEX inbox_user ON inbox(user_id, at);
+  CREATE TABLE booking_links (                          -- a link to book a time with you, for people outside the app
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE, title TEXT NOT NULL, minutes TEXT NOT NULL DEFAULT '[30,60]', days INTEGER NOT NULL DEFAULT 21,
+    hours TEXT NOT NULL DEFAULT 'work', calendar_id INTEGER, notice INTEGER NOT NULL DEFAULT 120, active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
+  );
+  CREATE TABLE bookings (
+    id INTEGER PRIMARY KEY,
+    link_id INTEGER NOT NULL REFERENCES booking_links(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL, email TEXT, note TEXT, start INTEGER NOT NULL, end INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',             -- pending (their own time, waits for you) · confirmed · declined
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

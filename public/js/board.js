@@ -1,5 +1,6 @@
 import { html, useState, useEffect, S, api, post, patch, del, load, toast, openModal, confirmDialog, when, dh, Avatar, recurText, SH, fromIso, go, InviteBox, priColor } from './lib.js';
 import { openTask } from './taskedit.js';
+import { findTime } from './bookings.js';
 import { I } from './icons.js';
 import OutlineView from './outline.js';
 import ProjectFocus from './pfocus.js';
@@ -135,9 +136,9 @@ export default function ProjectView({ id }) {
   const pick = v => { setView(v); try { localStorage.setItem('pv-' + id, v); } catch {} };
   const seg = html`<div class="seg pvseg"><button class=${view === 'overview' ? 'on' : ''} onClick=${() => pick('overview')}>Overview</button><button class=${view === 'detail' || (view === 'order' && p.kind !== 'outline') ? 'on' : ''} onClick=${() => pick('detail')}>${p.kind === 'outline' ? 'Outline' : 'Board'}</button>${p.kind === 'outline' && html`<button class=${view === 'order' ? 'on' : ''} onClick=${() => pick('order')}>Order</button>`}</div>`;
   if (view === 'overview') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/><span class="grow"></span>
-    <span class="avs">${p.members.map(m => html`<${Avatar} id=${m.id}/>`)}</span><${TeamButton} p=${p}/><button class="icon" title="Share" aria-label="Share" onClick=${() => share(p)}>${I('people')}</button><button class="icon" title="Project Settings" onClick=${() => projectSettings(p)}>${I('gear')}</button></div><${ProjectFocus} p=${p}/></div>`;
-  if (p.kind === 'outline' && view === 'order') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/><span class="grow"></span><${TeamButton} p=${p}/></div><${OrderView} p=${p}/></div>`;
-  if (p.kind === 'outline') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/><span class="grow"></span><${TeamButton} p=${p}/></div><${OutlineView} p=${p}/></div>`;
+    <span class="avs">${p.members.map(m => html`<${Avatar} id=${m.id}/>`)}</span><${TeamButton} p=${p}/>${p.members.length > 1 && html`<button class="icon" title="Find a Time" aria-label="Find a time" onClick=${() => findTime(p)}>${I('calendar')}</button>`}<button class="icon" title="Share" aria-label="Share" onClick=${() => share(p)}>${I('people')}</button><button class="icon" title="Project Settings" onClick=${() => projectSettings(p)}>${I('gear')}</button></div><${ProjectFocus} p=${p}/></div>`;
+  if (p.kind === 'outline' && view === 'order') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/><span class="grow"></span><${TeamButton} p=${p}/>${p.members.length > 1 && html`<button class="icon" title="Find a Time" aria-label="Find a time" onClick=${() => findTime(p)}>${I('calendar')}</button>`}</div><${OrderView} p=${p}/></div>`;
+  if (p.kind === 'outline') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/><span class="grow"></span><${TeamButton} p=${p}/>${p.members.length > 1 && html`<button class="icon" title="Find a Time" aria-label="Find a time" onClick=${() => findTime(p)}>${I('calendar')}</button>`}</div><${OutlineView} p=${p}/></div>`;
   const tasks = st.tasks.filter(t => t.project_id === p.id && isLeaf(t));
   const cols = p.columns.length ? p.columns : ['To do', 'Done'];
   const byCol = cols.map((_, i) => tasks.filter(t => (t.status === 'done' && !t.recur ? cols.length - 1 : Math.min(t.col, cols.length - 1)) === i).sort((a, b) => a.sort - b.sort || (a.sched?.first || Infinity) - (b.sched?.first || Infinity)));
@@ -154,7 +155,7 @@ export default function ProjectView({ id }) {
   return html`<div style="display:flex;flex-direction:column;height:100%">
     <div class="ptools">${seg}<${Progress} p=${p}/>
       <span class="avs">${p.members.map(m => html`<${Avatar} id=${m.id}/>`)}</span>
-      <${TeamButton} p=${p}/>
+      <${TeamButton} p=${p}/>${p.members.length > 1 && html`<button class="icon" title="Find a Time" aria-label="Find a time" onClick=${() => findTime(p)}>${I('calendar')}</button>`}
       <button class="icon" title="Share" aria-label="Share" onClick=${() => share(p)}>${I('people')}</button>
       <button class="icon" title="Project Settings" onClick=${() => projectSettings(p)}>${I('gear')}</button>
       <button onClick=${async () => setFeed(feed ? null : await api('/api/activity?project=' + id))}>${feed ? 'Hide' : 'Activity'}</button>

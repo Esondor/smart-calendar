@@ -1,4 +1,4 @@
-import { html, useState, useEffect, useLayoutEffect, useRef, S, api, post, patch, load, toast, openModal, confirmDialog, startOfDay, addDays, hm, DN, SH, dh, isoDate, fromIso, n24, priColor, isAppt } from './lib.js';
+import { html, useState, useEffect, useLayoutEffect, useRef, S, api, post, patch, load, toast, openModal, confirmDialog, startOfDay, addDays, hm, DN, SH, dh, isoDate, fromIso, n24, priColor, isAppt, parseQuick } from './lib.js';
 import { openTask } from './taskedit.js';
 import { I } from './icons.js';
 import { blockTime } from './now.js';
@@ -23,12 +23,33 @@ function lanes(items) {   // side-by-side layout for overlapping items
   flush(); return items;
 }
 // New: the same choices from the + button and from an empty spot in the calendar (there: at the time clicked)
+// New: the same choices from the + button and from an empty spot in the calendar (there: at the time clicked or the range
+// dragged). On top a line for a quick add: what it reads is shown as you type, Enter opens the form filled in.
 export async function newMenu({ at = null, end = null, project_id } = {}) {
-  const v = await openModal(close => html`<div class="modal sm"><h3>${at ? `${DN[new Date(at).getDay()]} ${SH(at)}, ${hm(at)}${end ? '–' + hm(end) : ''}` : 'New'}</h3><div class="menu">
-    <button onClick=${() => close('task')}>${I('list')}Task</button>
-    <button onClick=${() => close('appt')}>${I('calendar')}Appointment</button>
-    <button onClick=${() => close('break')}>${I('cup')}Break / Block Time</button></div>
-    <div class="acts"><button onClick=${() => close(null)}>Cancel</button></div></div>`);
+  const v = await openModal(close => { const B = () => {
+    const [q, setQ] = useState(''), r = q.trim() ? parseQuick(q) : null;
+    const go = () => r && r.title && close({ quick: r });
+    const pv = r && r.title && [r.kind === 'appt' ? 'Appointment' : 'Task', r.start ? `${DN[new Date(r.start).getDay()]} ${SH(r.start)}, ${hm(r.start)}${r.minutes ? '–' + hm(r.start + r.minutes * 60000) : ''}` : r.day ? `${DN[new Date(r.day).getDay()]} ${SH(r.day)}` : '',
+      !r.start && r.minutes ? dh(r.minutes) : '', r.due ? `due ${DN[new Date(r.due).getDay()]} ${SH(r.due)}` : '', r.priority != null ? ['ASAP', 'High', 'Medium', 'Low'][r.priority] : '', r.place ? '@' + r.place : ''].filter(Boolean).join(' · ');
+    return html`<div class="modal sm"><h3>${at ? `${DN[new Date(at).getDay()]} ${SH(at)}, ${hm(at)}${end ? '–' + hm(end) : ''}` : 'New'}</h3>
+      <input type="text" class="quick" placeholder="Dentist tue 15:00 1h @Main St" value=${q} onInput=${e => setQ(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter') { e.preventDefault(); go(); } }}
+        ref=${el => el && !el.dataset.f && matchMedia('(pointer:fine)').matches && (el.dataset.f = 1, setTimeout(() => el.focus(), 50))}/>
+      ${pv && html`<button class="qprev" onClick=${go}>${pv}${I('right', 14)}</button>`}
+      <div class="menu">
+      <button onClick=${() => close('task')}>${I('list')}Task</button>
+      <button onClick=${() => close('appt')}>${I('calendar')}Appointment</button>
+      <button onClick=${() => close('break')}>${I('cup')}Break / Block Time</button></div>
+      <div class="acts"><button onClick=${() => close(null)}>Cancel</button></div></div>`; }; return html`<${B}/>`; });
+  if (v?.quick) {
+    const r = v.quick;
+    // from the calendar: a click gives the day (and time) when the line has none
+    if (at && r.kind === 'appt' && r.day == null) { const d = new Date(at); d.setHours(0, 0, 0, 0); r.start = +d + r.time * 60000; }
+    if (r.kind === 'appt') return newAppointment(r.start, r.start + (r.minutes || (end && at ? (end - at) / 60000 : 60)) * 60000, { title: r.title, place: r.place, notes: '' });
+    const t = await openTask('new', { ...(project_id ? { project_id } : {}), title: r.title, ...(r.minutes ? { duration: r.minutes } : {}), ...(r.due ? { deadline: isoDate(r.due) } : {}),
+      ...(r.priority != null ? { priority: r.priority } : {}), ...(r.place ? { location: r.place } : {}), ...(r.hours ? { schedule: r.hours } : {}), ...(r.day ? { at: r.day + 8 * 3600e3 } : at ? { at } : {}) });
+    if (at && t?.id && !r.day) { await post(`/api/tasks/${t.id}/pin`, { period: t.period || 0, s: at, e: end || at + (t.duration || 30) * 60000 }); load(['plan']); }
+    return;
+  }
   if (v === 'task') { const t = await openTask('new', { ...(project_id ? { project_id } : {}), ...(at ? { at } : {}), ...(end ? { duration: Math.round((end - at) / 60000) } : {}) }); if (at && t?.id) { await post(`/api/tasks/${t.id}/pin`, { period: t.period || 0, s: at, e: end || at + (t.duration || 30) * 60000 }); load(['plan']); } }
   if (v === 'appt') newAppointment(at, end);
   if (v === 'break') blockTime(at, end);

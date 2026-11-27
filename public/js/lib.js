@@ -49,6 +49,7 @@ export async function load(what = ['projects', 'tasks', 'plan']) {
   if (what.includes('plan')) once('plan', async () => { const now = Date.now(), from = startOfDay(now) - 864e5; S.set({ plan: await api(`/api/plan?from=${from}&to=${from + 16 * 864e5}`) }); });
   if (what.includes('accounts')) once('accounts', async () => S.set({ accounts: await api('/api/accounts') }));
   if (what.includes('requests')) once('requests', async () => S.set({ requests: await api('/api/requests') }));
+  if (what.includes('inbox')) once('inbox', async () => S.set({ inbox: await api('/api/inbox') }));
   await Promise.all(jobs).catch(e => { if (S.state.me !== null) toast(e.message); });   // no toast on the sign-in screen
 }
 // live updates from the server (other devices, partner, calendar sync)
@@ -60,11 +61,11 @@ export function connectStream() {
     const { what } = JSON.parse(e.data);
     if (what === 'hello') return S.set({ sync: 'live' });
     clearTimeout(debounce);
-    debounce = setTimeout(() => load(what === 'sync' ? ['plan', 'tasks', 'accounts', 'projects'] : what === 'requests' ? ['requests'] : what === 'timer' || what === 'plan' ? ['plan'] : ['plan', 'tasks', 'projects']), 250);
+    debounce = setTimeout(() => load(what === 'sync' ? ['plan', 'tasks', 'accounts', 'projects', 'inbox'] : what === 'requests' || what === 'inbox' ? ['requests', 'inbox'] : what === 'timer' || what === 'plan' ? ['plan'] : ['plan', 'tasks', 'projects']), 250);
   };
   es.onerror = () => S.set({ sync: 'offline – reconnecting' });
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.state.me) load(['plan', 'tasks', 'requests']); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.state.me) load(['plan', 'tasks', 'requests', 'inbox']); });
 
 // ---------- time + format ----------
 export const startOfDay = ms => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return +d; };
@@ -79,6 +80,44 @@ const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'
 export const SH = ms => { const d = new Date(ms); return `${d.getDate()} ${MN[d.getMonth()]}`; };
 export const dayLabel = ms => { const t = startOfDay(Date.now()), d = startOfDay(ms); return d === t ? 'today' : d === addDays(t, 1) ? 'tomorrow' : d === addDays(t, -1) ? 'yesterday' : `${DN[new Date(ms).getDay()]} ${SH(ms)}`; };
 export const when = ms => ms ? `${dayLabel(ms)} ${hm(ms)}` : '';
+// quick add: one line → what it is. "Dentist tue 15:00 1h @Main St", "Tax return by fri 2h !!", "Call mum tomorrow 18-18:30",
+// German too ("Zahnarzt morgen um 15 Uhr", "bis Fr"; not "do" / "so", they are ordinary words). A time makes it an appointment, otherwise a task. What is not read stays the title.
+const WDN = [['sun', 'sunday', 'sonntag'], ['mon', 'monday', 'mo', 'montag'], ['tue', 'tues', 'tuesday', 'di', 'dienstag'], ['wed', 'wednesday', 'mi', 'mittwoch'],
+  ['thu', 'thur', 'thurs', 'thursday', 'donnerstag'], ['fri', 'friday', 'fr', 'freitag'], ['sat', 'saturday', 'sa', 'samstag']];
+export function parseQuick(text, base = Date.now()) {
+  let s = ' ' + String(text || '') + ' ';
+  const out = {}, take = (re, fn) => { const m = s.match(re); if (!m) return false; fn(m); s = s.replace(m[0], ' '); return true; };
+  const day0 = new Date(base); day0.setHours(0, 0, 0, 0);
+  const dayOf = w => { w = w.toLowerCase().replace(/\.$/, '');
+    if (/^(today|heute)$/.test(w)) return +day0; if (/^(tomorrow|morgen)$/.test(w)) return +day0 + 864e5; if (/^(übermorgen|uebermorgen)$/.test(w)) return +day0 + 2 * 864e5;
+    const i = WDN.findIndex(L => L.includes(w)); if (i >= 0) { const d = new Date(day0); d.setDate(d.getDate() + ((i - d.getDay() + 7) % 7)); return +d; }
+    let m = w.match(/^(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?$/); if (m) { const y = m[3] ? (+m[3] < 100 ? 2000 + +m[3] : +m[3]) : day0.getFullYear(); let d = new Date(y, +m[2] - 1, +m[1]); if (!m[3] && d < day0) d = new Date(y + 1, +m[2] - 1, +m[1]); return +d; }
+    m = w.match(/^(\d{4})-(\d{2})-(\d{2})$/); if (m) return +new Date(+m[1], +m[2] - 1, +m[3]);
+    return null; };
+  const DAYW = '(today|heute|tomorrow|morgen|übermorgen|uebermorgen|' + WDN.flat().join('|') + '|\\d{1,2}[./]\\d{1,2}(?:[./]\\d{2,4})?|\\d{4}-\\d{2}-\\d{2})\\.?';
+  // due: "by fri", "until 12.12.", "bis Fr", "due tomorrow"
+  take(new RegExp('\\s(?:by|until|due|bis|fällig)\\s+' + DAYW + '(?=\\s)', 'i'), m => { out.due = dayOf(m[1]); });
+  take(new RegExp('\\s(?:on|am)?\\s*' + DAYW + '(?=\\s)', 'i'), m => { const d = dayOf(m[1]); if (d != null) out.day = d; });
+  // priority: !!! / asap / urgent / dringend → ASAP, !! / high / wichtig → High, low / niedrig → Low
+  take(/\s(!!!|asap|urgent|dringend)(?=\s)/i, () => { out.priority = 0; }) || take(/\s(!!|high|wichtig)(?=\s)/i, () => { out.priority = 1; }) || take(/\s(low|niedrig)(?=\s)/i, () => { out.priority = 3; });
+  // a time range "15-16", "15:00-16:30"; a time "15:00", "3pm", "15 uhr", "at 15"
+  const tOf = (h, mi, ap) => { h = +h; if (ap) { ap = ap.toLowerCase(); if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0; } return h < 24 && (+mi || 0) < 60 ? h * 60 + (+mi || 0) : null; };
+  take(/\s(?:at\s+|um\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|uhr)?(?=\s)/i, m => { const a = tOf(m[1], m[2], m[3] || (m[6] !== 'uhr' && m[6])), b = tOf(m[4], m[5], m[6] !== 'uhr' && m[6]); if (a != null && b != null && b > a) { out.time = a; out.minutes = b - a; } })
+    || take(/\s(?:at\s+|um\s+)?(\d{1,2}):(\d{2})\s*(am|pm|uhr)?(?=\s)/i, m => { out.time = tOf(m[1], m[2], m[3] !== 'uhr' && m[3]); })
+    || take(/\s(?:at\s+|um\s+)?(\d{1,2})\s*(am|pm)(?=\s)/i, m => { out.time = tOf(m[1], 0, m[2]); })
+    || take(/\s(?:at\s+|um\s+)?(\d{1,2})\s*uhr(?=\s)/i, m => { out.time = tOf(m[1], 0); })
+    || take(/\s(?:at|um)\s+(\d{1,2})(?=\s)/i, m => { out.time = tOf(m[1], 0); });
+  // how long: "1h", "1,5h", "1h30", "45 min", "for 2 hours"
+  if (out.minutes == null) take(/\s(?:for\s+|für\s+)?(\d+(?:[.,]\d+)?)\s*(?:h|hr|hrs|hours?|std|stunden?)\s*(?:(\d{1,2})\s*(?:m|min)?)?(?=\s)/i, m => { out.minutes = Math.round(parseFloat(m[1].replace(',', '.')) * 60) + (+m[2] || 0); })
+    || take(/\s(?:for\s+|für\s+)?(\d{1,3})\s*(?:m|min|mins|minutes?|minuten?)(?=\s)/i, m => { out.minutes = +m[1]; });
+  // place: "@Main St 4" (to the end) ; hours: "#work", "#personal"
+  take(/\s#(\w+)(?=\s)/, m => { out.hours = m[1].toLowerCase(); });
+  take(/\s@\s*([^@]+?)\s*$/, m => { out.place = m[1].trim(); });
+  out.title = s.replace(/\s+/g, ' ').trim();
+  out.kind = out.time != null ? 'appt' : 'task';
+  if (out.time != null) { const d = out.day ?? (out.time * 60000 + +day0 > base ? +day0 : +day0 + 864e5); out.start = d + out.time * 60000; }
+  return out;
+}
 // a duration typed freely, in minutes: "1:30", "1;30", "1.5", "1,5", "1h30", "1 h 30 min", "90", "90m", "2h", "2 Std" …
 // a plain number up to 9 is hours, from 10 on minutes; null if it can't be read
 export function parseDur(txt) {

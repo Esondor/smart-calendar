@@ -8,8 +8,8 @@ import { sendPush } from './push.js';
 import { sendMail, mailReady } from './mail.js';
 import { baseUrl } from './serverconf.js';
 
-export const NOTIFY_TYPES = ['start', 'event', 'deadline', 'morning', 'clash', 'partner', 'ready', 'sync'];
-export const DEFAULT_CH = { start: 'push', event: 'off', deadline: 'push', morning: 'push', clash: 'both', partner: 'push', ready: 'push', sync: 'push' };
+export const NOTIFY_TYPES = ['start', 'event', 'deadline', 'morning', 'clash', 'partner', 'ready', 'sync', 'booking'];
+export const DEFAULT_CH = { start: 'push', event: 'off', deadline: 'push', morning: 'push', clash: 'both', partner: 'push', ready: 'push', sync: 'push', booking: 'push' };
 const CH = ['off', 'push', 'email', 'both'];
 export function channelOf(n, type) {
   const c = n?.ch?.[type];

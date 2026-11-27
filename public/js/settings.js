@@ -1,5 +1,6 @@
 import { html, useState, useEffect, useRef, S, api, post, patch, del, load, toast, confirmDialog, openModal, when, DN, n24, InviteBox } from './lib.js';
 import { I } from './icons.js';
+import { BookingLinks } from './bookings.js';
 import { rankOrder, PlaceInput } from './eventsheet.js';
 import { passkeysSupported, createPasskey, getPasskey } from './passkey.js';
 import { BACKGROUNDS, applyBackground } from './backgrounds.js';
@@ -241,9 +242,9 @@ function Notify() {
   </div>`;
 }
 // every notification the app sends; each one: Off, Push, E-mail or Both (same defaults as the server)
-const NOTIFY = [['start', 'Task starts'], ['event', 'Event starts'], ['deadline', 'Deadlines'], ['morning', 'Daily summary'], ['clash', 'Clashes'], ['partner', 'Shared projects'], ['ready', 'Follow-ups ready'], ['sync', 'Connection problems']];
+const NOTIFY = [['start', 'Task starts'], ['event', 'Event starts'], ['deadline', 'Deadlines'], ['morning', 'Daily summary'], ['clash', 'Clashes'], ['partner', 'Shared projects'], ['ready', 'Follow-ups ready'], ['sync', 'Connection problems'], ['booking', 'Bookings']];
 const CHANNELS = [['off', 'Off'], ['push', 'Push'], ['email', 'E-mail'], ['both', 'Both']];
-const DEF_CH = { start: 'push', event: 'off', deadline: 'push', morning: 'push', clash: 'both', partner: 'push', ready: 'push', sync: 'push' };
+const DEF_CH = { start: 'push', event: 'off', deadline: 'push', morning: 'push', clash: 'both', partner: 'push', ready: 'push', sync: 'push', booking: 'push' };
 const chOf = (n, k) => n.ch?.[k] || (((k === 'start' && n.start === false) || (k === 'morning' && !n.morning) || (k === 'partner' && n.partner === false) || (k === 'deadline' && n.deadline === false)) ? 'off' : DEF_CH[k]);
 
 function Account() {
@@ -396,6 +397,7 @@ export default function SettingsView() {
     <${Group} id="invite" icon="plus" color="#bf5af2" title="Invite" sub="Link or code for someone new"><div class="box"><${InviteBox}/></div></${Group}>
     <${Group} id="cal" icon="calendar" color="#ff375f" title="Calendars" sub=${cals ? `${cals} connected` : 'Connect Google, Exchange, Vikunja'}><${Calendars}/><${Ranking}/></${Group}>
     <${Group} id="plan" icon="clock" color="#0a84ff" title="Planning" sub=${'Work ' + hrs}><${Hours}/><${Home}/><${Fixed}/></${Group}>
+    <${Group} id="booking" icon="share" color="#32d74b" title="Booking" sub="Links to book a time with you"><${BookingLinks}/></${Group}>
     <${Group} id="notify" icon="bell" color="#ff9f0a" title="Notifications"><${Notify}/></${Group}>
     <${Group} id="look" icon="sun" color="#30b0c7" title="Appearance" sub=${bg}><${Appearance}/></${Group}>
     <${Group} id="devices" icon="shield" color="#34c759" title="Devices & Access" sub="Signed-in devices, tokens"><${Sect} t="Devices"/><div class="box"><${Sessions}/></div>${isMac && html`<${MacBar}/>`}<${Tokens}/></${Group}>

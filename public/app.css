@@ -1167,3 +1167,33 @@ aside.files .tgroup .ffile:first-child{border-top:0}
 @media (max-width:860px){.colm.arch,.colm.arch.open{flex:none;min-width:0}.colm.arch:not(.open) h4{writing-mode:horizontal-tb;transform:none;margin:4px 8px}}
 .colm>h4{justify-content:flex-start}.colm>h4>span{margin-left:auto}.colm h4 .archall{margin-left:0}
 .card .ct .flag{flex:none;width:8px;height:8px;border-radius:50%}
+
+/* notification center: the bell with its count, and the panel (like Files) */
+.inboxb{position:relative}
+.inboxb .badge{position:absolute;top:3px;right:3px;min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:var(--late);color:#fff;font:700 10px/16px system-ui;font-style:normal;text-align:center}
+aside.files.inbox{bottom:auto;max-height:calc(100% - 20px);width:min(380px,calc(100vw - 20px))}
+aside.files .clearall{width:auto;flex:none;color:var(--acc);font-size:13px;padding:4px 10px}
+aside.files .nrow{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-top:1px solid var(--row-line,var(--line))}
+aside.files .nrow:first-child{border-top:0}
+aside.files .nrow>svg{flex:none;margin-top:2px;color:var(--acc)}
+aside.files .nt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:13.5px}
+aside.files .nt b{font-weight:500}
+aside.files .nt span{color:var(--muted);font-size:12.5px}
+aside.files .nt time{color:var(--muted);font-size:11.5px}
+aside.files .nbtn{display:flex;gap:6px;flex:none;align-self:center}
+aside.files .nbtn button{width:auto;padding:5px 10px;font-size:13px}
+aside.files .nbtn button.pri{background:var(--acc);color:#fff}
+aside.files .nrow .icon{width:24px;height:24px;min-width:24px;min-height:24px;padding:0;flex:none;opacity:.6}
+aside.files .box.clash{margin:0 0 8px}
+
+/* Find a Time / booking: times as small buttons, a fit that moves tasks a little lighter */
+.slots{margin-top:12px;max-height:46vh;overflow:auto}
+.slots .tday{font-size:12px;color:var(--muted);font-weight:600;padding:10px 4px 4px}
+.srow{display:flex;flex-wrap:wrap;gap:6px}
+.slot{padding:7px 12px;border-radius:999px;background:var(--acc-s);color:var(--acc);font-weight:600;font-variant-numeric:tabular-nums}
+.slot.good{background:var(--fill2);color:var(--ink)}
+.cell .dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}.cell .dot.on{background:var(--done)}
+
+/* quick add on top of New: what it reads, as a button that opens the form */
+.modal input.quick{width:100%;box-sizing:border-box;margin:4px 0 8px;font-size:16px}
+.qprev{width:100%;justify-content:space-between;margin:0 0 10px;background:var(--acc-s);color:var(--acc);font-weight:500;text-align:left}
