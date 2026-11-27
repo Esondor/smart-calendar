@@ -156,6 +156,26 @@ export default function CalendarView() {
     el.addEventListener('touchend', end, { passive: true }); el.addEventListener('touchcancel', end, { passive: true });
     return () => { el.removeEventListener('touchstart', start); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', end); el.removeEventListener('touchcancel', end); };
   }, [month, mobile, zoom, hh, focus, cw, from]);
+  // desktop trackpad: a sideways swipe turns one page, like the arrow buttons; the momentum after it is used up, not scrolled.
+  // A new swipe while the last one still coasts (its speed going up again) turns the next page.
+  const stepRef = useRef(); stepRef.current = k => step(k);
+  useEffect(() => {
+    const el = sc.current; if (!el || month || guard) return;
+    let acc = 0, last = 0, fired = 0, prev = 0;
+    const wheel = e => {
+      const dx = e.deltaX || (e.shiftKey ? e.deltaY : 0);
+      if (!dx || Math.abs(dx) < Math.abs(e.deltaY) && !e.shiftKey) return;
+      e.preventDefault();
+      const t = e.timeStamp, a = Math.abs(dx);
+      if (t - last > 180 || (fired && t - fired > 350 && a > 15 && a > prev * 1.6)) { acc = 0; fired = 0; }   // a new swipe
+      last = t; prev = a;
+      if (fired) return;
+      acc += dx;
+      if (Math.abs(acc) > 30) { fired = t; stepRef.current(acc > 0 ? 1 : -1); }
+    };
+    el.addEventListener('wheel', wheel, { passive: false });
+    return () => el.removeEventListener('wheel', wheel);
+  }, [month, guard, mode]);
   const ticking = useRef(false);
   // more days/weeks are rendered only once scrolling has come to rest: on a phone the momentum (and the snapping in
   // month view) carries on after the finger lifts, and moving the window under it sent it scrolling on without end
