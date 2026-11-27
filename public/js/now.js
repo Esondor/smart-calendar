@@ -45,13 +45,19 @@ function context(u) {
   return { text: [u.p_name, ...chain.map(c => c.meta?.level === 'chapter' && c.meta.num ? `${c.meta.num} ${c.meta.short || c.title}` : c.title)].filter(Boolean).join(' · '), warn, num: t.meta?.n };
 }
 
-// an appointment (e.g. from the group calendar): fixed with other people, so no timer or Done, only where and how to join
+// an appointment: where and how to join; one you are in can be tracked (Start, Pause) and finished (Done). Tracked past its
+// end it keeps its time, 30 min more each time, until Done
 function ApptCard({ ev, lab, next }) {
-  return html`<div class=${'focus appt' + (next ? ' next' : '')} onClick=${e => { if (!e.target.closest('a')) openEventSheet(ev); }}>
-    <div class=${'lab' + (next ? '' : ' live')}>${lab}</div>
+  const tr = ev.track, on = !!tr?.since, used = (tr?.spent || 0) + (on ? (Date.now() - tr.since) / 60000 : 0), planned = Math.max(1, (ev.end - ev.start) / 60000);
+  const act = async (fn, msg) => { try { await fn(); await load(['plan']); if (msg) toast(msg); } catch (e) { toast(e.message); } };
+  return html`<div class=${'focus appt' + (next ? ' next' : '')} onClick=${e => { if (!e.target.closest('a, button')) openEventSheet(ev); }}>
+    <div class=${'lab' + (next ? '' : ' live')}>${on ? 'In progress · until ' + hm(ev.end) : lab}</div>
     <div class="ft">${ev.title} <${AlsoDots} ev=${ev}/></div>
     <div class="ctx">${hm(ev.start)}–${hm(ev.end)}${placeText(ev.location) ? ' · ' + placeText(ev.location) : ''} · ${ev.cal}${ev.travel?.there && ev.before && ev.start > Date.now() ? html` · <span class="way" title=${`${dh(ev.travel.min)} by ${ev.travel.mode}`}>${I(ev.travel.mode, 12)}${hm(ev.start - ev.before * 60000)}</span>` : ''}</div>
+    ${!next && tr && html`<div class="timer"><span class="clk">${clock(used)}</span><span class="of">of ${dh(planned)}</span><div class="bar"><i style=${{ width: Math.min(100, 100 * used / planned) + '%' }}></i></div></div>`}
     ${(ev.join || !next) && html`<div class="btns">${ev.join && html`<a class="join" href=${ev.join} target="_blank" rel="noopener">Join</a>`}
+      ${!next && (on ? html`<button onClick=${() => act(() => post(`/api/events/${ev.id}/pause`))}>${I('pause', 16, { w: 2.4 })}Pause</button>`
+        : html`<button class="go" onClick=${() => act(() => post(`/api/events/${ev.id}/start`))}>${I('play', 16, { w: 2 })}${tr ? 'Resume' : 'Start'}</button>`)}
       ${!next && html`<button class="ok" onClick=${e => { e.stopPropagation(); finishEvent(ev, 'now'); }}>${I('check', 16, { w: 2.4 })}Done</button>`}</div>`}</div>`;
 }
 export function FocusCard({ plan, big = true }) {

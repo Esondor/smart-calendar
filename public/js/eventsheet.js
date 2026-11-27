@@ -121,6 +121,8 @@ export async function openEventSheet(ev) {
           <div class="cell"><div class="seg days">${WD.map(([d, l]) => html`<button type="button" class=${f.win.days.includes(d) ? 'on' : ''} onClick=${() => setF({ ...f, win: { ...f.win, days: f.win.days.includes(d) ? f.win.days.filter(x => x !== d) : [...f.win.days, d] } })}>${l}</button>`)}</div></div>`}</div>
       ${ev.editable && timed && rankOrder().order.length > 1 && html`<${EventRank} ev=${ev} value=${f.rank} set=${v => setF({ ...f, rank: v })}/>`}
       ${ev.editable && html`<${AlsoIn} ev=${ev}/>`}
+      ${timed && ev.start <= Date.now() + 15 * 60000 && (ev.end > Date.now() || ev.track) && !ev.done && html`<div class="sect" style="margin:16px 4px 6px">Track</div><div class="menu">
+        ${ev.track?.since ? html`<button onClick=${() => close({ track: 'pause' })}>${I('pause')}Pause</button>` : html`<button onClick=${() => close({ track: 'start' })}>${I('play')}${ev.track ? 'Resume' : 'Start'}</button>`}</div>`}
       ${timed && ev.start <= Date.now() && !ev.done && html`<div class="sect" style="margin:16px 4px 6px">Done</div><div class="menu">
         <button onClick=${() => close({ done: 'now' })}>${I('check')}Ended Now · ${hm(Date.now())}</button>
         ${ev.end <= Date.now() && html`<button onClick=${() => close({ done: 'planned' })}>${I('check')}As Planned · ${hm(ev.end)}</button>`}
@@ -132,6 +134,7 @@ export async function openEventSheet(ev) {
         <button onClick=${() => close({ ...f, move: 'auto' })}>${I('repeat')}Auto-schedule</button></div>`}
       <div class="acts">${ev.editable && html`<button class="icon" style="margin-right:auto;color:var(--late)" title="Delete" onClick=${() => close({ ...f, del: true })}>${I('trash')}</button>`}<button onClick=${() => close({ discard: true })}>Discard</button><button class="pri" onClick=${() => close(f)}>Save</button></div></div>`; }; return html`<${B}/>`; });
   if (r?.done) return finishEvent(ev, r.done);
+  if (r?.track) { try { await post(`/api/events/${ev.id}/${r.track}`); await load(['plan']); } catch (e) { toast(e.message); } return; }
   if (!r) r = JSON.stringify(cur.f) !== JSON.stringify(f0) ? cur.f : null;
   if (!r || r.discard) return;
   let id = ev.id;

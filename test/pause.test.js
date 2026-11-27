@@ -58,3 +58,18 @@ test('done, another task or stop: no longer waits in Now', () => {
   A.setDone(u, o, 0, true);
   assert.equal(get('SELECT 1 FROM paused WHERE user_id = ?', u), undefined);
 });
+
+test('a tracked appointment that runs over keeps its time until Done or Pause', async () => {
+  const { encrypt } = await import('../server/crypto.js');
+  const { calendarEvents } = await import('../server/planner.js');
+  const acc = Number(run(`INSERT INTO accounts(user_id, kind, label, secret, status) VALUES (?, 'google', 'me', ?, 'ok')`, u, encrypt({ refresh_token: 'r' })).lastInsertRowid);
+  const cal = Number(run(`INSERT INTO calendars(account_id, user_id, ext_id, name, use_busy, writable) VALUES (?, ?, 'me@x', 'Me', 1, 0)`, acc, u).lastInsertRowid);
+  const t = Date.now(), s = t - 90 * 60000, e = t - 20 * 60000;   // 1:10 h blocked, ended 20 min ago
+  run(`INSERT INTO events(calendar_id, ext_id, start, end, title, all_day) VALUES (?, 'blk', ?, ?, 'Report', 0)`, cal, s, e);
+  const find = () => calendarEvents(u, t - 864e5, t + 864e5).find(x => x.ext_id === 'blk');
+  assert.equal(find().end, e, 'not tracked: as planned');
+  run(`INSERT INTO event_track(user_id, calendar_id, ext_id, start, since) VALUES (?, ?, 'blk', ?, ?)`, u, cal, s, s);
+  assert.equal(find().end, e + 30 * 60000, 'tracked: 30 min more');
+  A.pauseEvent(u);
+  assert.equal(find().end, e, 'paused: as planned again');
+});

@@ -15,7 +15,7 @@ import { normalizeUrl } from './sync/ics.js';
 import { vikunjaUser, docFiles, attachment, forgetFiles, uploadFile } from './sync/vikunja.js';
 import { syncAccount } from './sync/loop.js';
 import { vapidPublicKey, sendPush } from './push.js';
-import { finishEvent } from './eventdone.js';
+import { finishEvent, startEvent } from './eventdone.js';
 import { listClashes, decideClash, dismissClash, undismissClash, hiddenEvents, userTag } from './conflicts.js';
 import { mailReady, sendMail } from './mail.js';
 import { notify, NOTIFY_TYPES } from './notify.js';
@@ -442,6 +442,9 @@ export default async function apiRoutes(app) {
     markDirty(req.user.id, true); return { copied: n };
   });
   app.post('/api/events/:id/done', async req => finishEvent(req.user.id, ownEvent(req.user.id, req.params.id), req.body?.end));
+  // track an appointment (e.g. blocked time that takes longer): Start, Pause; a task timer pauses it and the other way round
+  app.post('/api/events/:id/start', async req => { const r = await startEvent(req.user.id, ownEvent(req.user.id, req.params.id)); markDirty(req.user.id, true); return r; });
+  app.post('/api/events/:id/pause', async req => { ownEvent(req.user.id, req.params.id); A.pauseEvent(req.user.id); markDirty(req.user.id, true); return { ok: true }; });
   app.post('/api/events/:id/show', async req => { const e = ownEvent(req.user.id, req.params.id); undismissClash(req.user.id, e.calendar_id, e.ext_id); return { ok: true }; });
   app.put('/api/events/:id/buffer', async req => {
     const e = get('SELECT e.*, c.user_id FROM events e JOIN calendars c ON c.id = e.calendar_id WHERE e.id = ?', +req.params.id);
@@ -478,7 +481,8 @@ export default async function apiRoutes(app) {
     const evs = raw.map(e => { const r = rules.get(`${e.calendar_id}:${e.series || e.ext_id}`) || {}; return { id: e.id, location: e.location || null, join: joinLink(e),
       hours: r.hours || null, win: r.win || null, rankSet: r.rank || null, rank: rankOf(e), start: e.start, end: e.end, all_day: e.all_day, title: e.title, free: e.free, cal: e.cal, color: e.color,
       blocks: e.blocks, before: e.before, after: e.after, travel: e.travel ? { mode: e.travel.mode, min: e.travel.min, there: e.travel.there, home: e.travel.home } : null, pin: e.pin || null, custom: e.custom, forced: e.forced, recurring: e.recurring, editable: !!e.editable, calendar_id: e.calendar_id, ext_id: e.ext_id, hidden: hidden.has(e.id),
-      alsoIn: e.dup ? (also.get(e.dup + '@' + e.start) || []).filter(c => c.id !== e.calendar_id) : [], done: !!e.t_done }; });
+      alsoIn: e.dup ? (also.get(e.dup + '@' + e.start) || []).filter(c => c.id !== e.calendar_id) : [], done: !!e.t_done,
+      track: e.t_since || e.t_spent ? { since: e.t_since || null, spent: e.t_spent || 0 } : null }; });
     const moved = all('SELECT DISTINCT task_id, period, kind FROM overrides WHERE user_id = ? AND end > ?', uid, now);
     const doneT = all(`SELECT t.id, t.title, t.done_at AS at, p.color FROM tasks t JOIN projects p ON p.id = t.project_id JOIN project_members m ON m.project_id = p.id AND m.user_id = ?
       WHERE t.status = 'done' AND t.done_at BETWEEN ? AND ? AND t.done_by = ?`, uid, from, to, uid);

@@ -157,13 +157,16 @@ const mealOf = t => /breakfast|fr(ü|ue)hst(ü|ue)ck/i.test(t) ? 'breakfast' : /
 export function calendarEvents(uid, from, to, settings = settingsOf(uid)) {
   const def = Math.max(0, +(settings.plan?.eventBuffer ?? 15) || 0), bikeMax = settings.plan?.bikeMax ?? 25;
   const rows = all(`SELECT e.id, e.calendar_id, e.ext_id, e.series, e.start, e.end, e.all_day, e.title, e.free, e.descr, e.location, e.link, e.dup, c.name AS cal, c.color, c.use_busy, c.include_words, c.exclude_words, c.only_mine,
-      b.before AS b_before, b.after AS b_after, b.block AS b_block, (c.writable = 1 AND a.kind = 'google') AS editable, t.ended AS t_ended, t.began AS t_began, t.done_at AS t_done
+      b.before AS b_before, b.after AS b_after, b.block AS b_block, (c.writable = 1 AND a.kind = 'google') AS editable, t.ended AS t_ended, t.began AS t_began, t.done_at AS t_done, t.since AS t_since, t.spent AS t_spent
     FROM events e JOIN calendars c ON c.id = e.calendar_id JOIN accounts a ON a.id = c.account_id
     LEFT JOIN event_buffers b ON b.user_id = c.user_id AND b.calendar_id = e.calendar_id AND b.series = COALESCE(e.series, e.ext_id)
     LEFT JOIN event_track t ON t.user_id = c.user_id AND t.calendar_id = e.calendar_id AND t.ext_id = e.ext_id
     WHERE c.user_id = ? AND e.ours = 0 AND e.end > ? AND e.start < ? ORDER BY e.start`, uid, from - 864e5, to + 864e5);
   // Start and Done (eventdone.js): a read-only calendar keeps its time, the planning uses the real start (same length) and end
   for (const r of rows) { if (r.t_began) { const d = r.t_began - r.start; r.start += d; r.end += d; } if (r.t_ended && r.t_ended > r.start) r.end = r.t_ended; }
+  // tracked and still running past its end: it keeps its time, 30 min more each time, until Done or Pause
+  const now = Date.now();
+  for (const r of rows) if (r.t_since && !r.t_done && !r.all_day && r.start <= now && r.end <= now + 60000) r.end = openEnd(r.end, now + 60000);
   // where you go for each event (place rules) and the way there from home
   const rules = settings.plan?.places || [], tt = new Map(all('SELECT place, car, bike FROM travel_times WHERE user_id = ?', uid).map(t => [t.place, t]));
   for (const r of rows) { const rule = ruleOf(r, rules); r.pin = rule?.lat != null ? { label: rule.place, url: pinUrl(rule) } : null; r.place = placeOf(r, rules); const t = tt.get(placeKey(r.place)); r.tv_car = t?.car ?? null; r.tv_bike = t?.bike ?? null; }
