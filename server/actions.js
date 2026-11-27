@@ -146,6 +146,18 @@ export function applyCalendarChange(uid, { r, kind, s, e }) {
 
 // move a planned block in the web app (drag in the calendar) = same as moving it in Google
 export function pinBlock(uid, taskId, period, oldStart, s, e) {
+  // the session that runs now: its start is when you began (earlier or later, not before your last session), its end where
+  // you put it, then 30 min more each time it is reached, until Done
+  const a = get('SELECT * FROM active WHERE user_id = ?', uid), now = Date.now();
+  if (s != null && a && a.task_id === taskId && (a.period || 0) === period && s < now) {
+    const last = get('SELECT MAX(end) e FROM work_log WHERE user_id = ? AND end <= ?', uid, now)?.e || 0;
+    const since = Math.max(Math.min(s, now - 60000), last, now - 864e5);
+    run('UPDATE active SET since = ?, until = ? WHERE user_id = ?', since, Math.max(e, now + 5 * 60000), uid);
+    run(`DELETE FROM overrides WHERE user_id = ? AND task_id = ? AND period = ? AND kind = 'pin'`, uid, taskId, period);
+    run('UPDATE plan_events SET start = ?, end = ? WHERE user_id = ? AND task_id = ? AND period = ? AND ABS(start - ?) < 60000', since, e, uid, taskId, period, oldStart || 0);
+    markDirty(uid); notifyUsers([uid], 'timer');
+    return;
+  }
   run(`DELETE FROM overrides WHERE user_id = ? AND task_id = ? AND period = ? AND kind = 'pin' AND (ABS(start - ?) < 60000 OR ? = 0)`, uid, taskId, period, oldStart || 0, oldStart ? 1 : 0);
   if (s != null) run(`INSERT INTO overrides(user_id, task_id, period, kind, start, end, created_at) VALUES (?, ?, ?, 'pin', ?, ?, ?)`, uid, taskId, period, s, e, Date.now());
   if (s != null) run('UPDATE plan_events SET start = ?, end = ? WHERE user_id = ? AND task_id = ? AND period = ? AND ABS(start - ?) < 60000', s, e, uid, taskId, period, oldStart || 0);

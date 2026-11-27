@@ -49,3 +49,27 @@ test('a block started late starts from its planned time and keeps going until Do
   A.stopTimer(u, { done: true, end: after });
   assert.equal(get('SELECT start FROM work_log WHERE task_id = ?', tid).start, b.s);
 });
+
+test('dragging the running session: earlier start, longer end, and it stays there', () => {
+  const t0 = Date.now();
+  A.startTimer(u, tid, 0);
+  const s = t0 - 40 * 60000, e = t0 + 90 * 60000;
+  A.pinBlock(u, tid, 0, t0, s, e);
+  const a = get('SELECT * FROM active WHERE user_id = ?', u);
+  assert.ok(a.since >= s && a.since < t0, 'started earlier (not before the last session)');
+  assert.equal(a.until, e);
+  const b = planUser(u, t0 + 60000).blocks.filter(x => x.key === String(tid));
+  assert.equal(b.length, 1); assert.equal(b[0].s, a.since); assert.equal(b[0].e, e);
+  A.stopTimer(u);
+});
+
+test('a block dragged twice ends where it was dropped last', () => {
+  const b = planUser(u, Date.now()).blocks.find(x => x.key === String(tid));
+  const s1 = b.s + 3 * 3600e3, s2 = s1 + 3600e3, len = b.e - b.s;
+  A.pinBlock(u, tid, 0, b.s, s1, s1 + len);
+  A.pinBlock(u, tid, 0, s1, s2, s2 + len + 30 * 60000);   // the second drag starts from where the first one put it, and is longer
+  const pins = get(`SELECT COUNT(*) n FROM overrides WHERE user_id = ? AND task_id = ? AND kind = 'pin'`, u, tid).n;
+  assert.equal(pins, 1);
+  const bl = planUser(u, Date.now()).blocks.filter(x => x.key === String(tid));
+  assert.ok(bl.some(x => x.s === s2 && x.e === s2 + len + 30 * 60000));
+});

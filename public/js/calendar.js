@@ -203,7 +203,8 @@ export default function CalendarView() {
       (collapse && (!e.blocks || e.hidden) ? mini : out).push(x);
     });
     plan.busy.filter(b => b.e > d0 && b.s < d1).forEach(b => out.push({ kind: b.kind === 'fixed' ? 'fixed' : 'appt', s: Math.max(b.s, d0), e: Math.min(b.e, d1), t: b.t, id: b.id }));
-    plan.blocks.filter(b => b.e > d0 && b.s < d1).forEach(b => { const u = plan.units[b.key]; if (u) out.push({ kind: 'block', s: b.s, e: b.e, b, u }); });
+    plan.blocks.map(b => { const p = pendFor(b); return p ? { ...b, s: p.s, e: p.e, srv: b.s, pinned: true } : b; })
+      .filter(b => b.e > d0 && b.s < d1).forEach(b => { const u = plan.units[b.key]; if (u) out.push({ kind: 'block', s: b.s, e: b.e, b, u }); });
     // done and tracked: kept as it happened (timer sessions; a task ticked off without one, as the quarter hour before)
     const log = plan.log || [];
     log.filter(l => l.end > d0 && l.start < d1).forEach(l => out.push({ kind: 'past', s: Math.max(l.start, d0), e: Math.min(l.end, d1), s1: l.start, e1: l.end, t: l.title || 'Session', c: l.color, p: l.p_name, done: !!l.done, task: l.task_id, research: l.kind === 'research' }));
@@ -212,44 +213,93 @@ export default function CalendarView() {
     return { out: lanes(out.filter(x => !x.nolane)).concat(out.filter(x => x.nolane)), allDay, mini };
   };
 
-  // first tap selects a block (then it can be dragged / resized), a second tap opens it; scrolling never moves anything
-  const drag = useRef(null), [sel, setSel] = useState(null);
+  // first tap selects a block (then it can be dragged / resized at either end), a second tap opens it; scrolling never moves anything.
+  // Where you drop it is where it stays: shown there at once, kept there through plan reloads, and saved shortly after the
+  // last drop (several drags in a row are one change), then the plan around it follows.
+  const drag = useRef(null), [sel, setSel] = useState(null), [, redraw] = useState(0);
+  const pend = useRef(new Set());   // { key, starts: server starts it had, srv: its start on the server, s, e, ver, t, busy }
+  const pendFor = b => { for (const p of pend.current) if (p.key === b.key && p.starts.has(b.s)) return p; return null; };
   const selKey = it => it.b.key + ':' + it.b.s;
-  const onDown = (e, it) => {
-    const el = e.currentTarget;
-    if (who !== st.me.id || sel !== selKey(it)) { drag.current = { it, tap: true, x0: e.clientX, y0: e.clientY }; return; }
-    drag.current = { it, el, x0: e.clientX, y0: e.clientY, cw: el.parentElement.getBoundingClientRect().width, moved: false, dm: 0, dd: 0, resize: !!e.target.closest('.rs'), h0: el.offsetHeight };
-    el.setPointerCapture(e.pointerId);
+  // drawn with CSS variables and a data attribute only: what the page renders (top, height, text) is never touched, so
+  // nothing is left behind or put back wrong when the plan redraws during or after a drag
+  const paint = (g, el) => {
+    if (!el) return;
+    const k = g.mode === 'move' ? g.dm * 60000 + g.dd * 864e5 : g.dm * 60000;
+    const s = g.mode === 'end' ? g.it.s : g.it.s + k, e = g.mode === 'start' ? g.it.e : g.it.e + k;
+    const px = m => (m / 60 * hh) + 'px';
+    el.style.setProperty('--dx', g.mode === 'move' ? g.dd * g.cw + 'px' : '0px');
+    el.style.setProperty('--dy', g.mode === 'end' ? '0px' : px(g.dm));
+    if (g.mode === 'move') el.style.removeProperty('--dh'); else el.style.setProperty('--dh', (g.h0 + (g.mode === 'end' ? 1 : -1) * g.dm / 60 * hh) + 'px');
+    el.classList.add('drag');
+    const em = el.querySelector('.em'); if (em) em.dataset.t = `${hm(s)}–${hm(e)}`;
   };
-  const onCancel = () => { const g = drag.current; drag.current = null; if (g?.el) { g.el.style.transform = ''; g.el.style.height = ''; g.el.classList.remove('drag'); } };
-  const onMove = e => {
+  const unpaint = el => { if (!el) return; ['--dx', '--dy', '--dh'].forEach(v => el.style.removeProperty(v)); el.classList.remove('drag'); const em = el.querySelector('.em'); if (em) delete em.dataset.t; };
+  const elOf = g => g.el?.isConnected ? g.el : (g.el = document.querySelector(`.ev[data-k="${CSS.escape(g.k)}"]`));
+  useLayoutEffect(() => { const g = drag.current; if (g?.moved) paint(g, elOf(g)); });
+  const listen = on => ['pointermove', 'pointerup', 'pointercancel'].forEach((t, i) => (on ? addEventListener : removeEventListener)(t, [onMove, onUp, onCancel][i]));
+  const onDown = (e, it) => {
+    if (drag.current) return;
+    const el = e.currentTarget;
+    if (who !== st.me.id || sel !== selKey(it)) drag.current = { it, tap: true, x0: e.clientX, y0: e.clientY };
+    else {
+      const h = e.target.closest('.rs'), mode = !h ? 'move' : h.classList.contains('rs-top') ? 'start' : 'end';
+      drag.current = { it, el, k: selKey(it), x0: e.clientX, y0: e.clientY, cw: el.parentElement.getBoundingClientRect().width, moved: false, dm: 0, dd: 0, mode, h0: el.offsetHeight };
+      try { el.setPointerCapture(e.pointerId); } catch {}
+    }
+    listen(true);
+  };
+  function onCancel() { listen(false); const g = drag.current; drag.current = null; if (g?.el) unpaint(elOf(g)); }
+  function onMove(e) {
     const g = drag.current; if (!g) return;
     const dx = e.clientX - g.x0, dy = e.clientY - g.y0;
-    if (g.tap) { if (Math.hypot(dx, dy) > 8) drag.current = null; return; }
+    if (g.tap) { if (Math.hypot(dx, dy) > 8) { drag.current = null; listen(false); } return; }
     if (!g.moved && Math.hypot(dx, dy) < 6) return;
-    g.moved = true; g.el.classList.add('drag');
-    g.dm = Math.round(dy / hh * 4) * 15; g.dd = g.resize ? 0 : Math.round(dx / g.cw);
-    if (g.resize) { g.dm = Math.max(g.dm, 15 - (g.it.e - g.it.s) / 60000); g.el.style.height = (g.h0 + g.dm / 60 * hh) + 'px'; g.el.querySelector('.em').textContent = `${hm(g.it.s)}–${hm(g.it.e + g.dm * 60000)}`; return; }
-    g.el.style.transform = `translate(${g.dd * g.cw}px, ${g.dm / 60 * hh}px)`;
-    g.el.querySelector('.em').textContent = `${hm(g.it.s + g.dm * 60000 + g.dd * 864e5)}–${hm(g.it.e + g.dm * 60000 + g.dd * 864e5)}`;
+    g.moved = true;
+    const len = (g.it.e - g.it.s) / 60000;
+    g.dm = Math.round(dy / hh * 4) * 15; g.dd = g.mode === 'move' ? Math.round(dx / g.cw) : 0;
+    if (g.mode === 'end') g.dm = Math.max(g.dm, 15 - len);
+    if (g.mode === 'start') g.dm = Math.min(g.dm, len - 15);
+    paint(g, elOf(g));
+  }
+  // save a block's new place: after a short pause, one at a time, the latest place wins
+  const flush = async p => {
+    p.t = null;
+    if (p.busy) { p.again = true; return; }
+    p.busy = true; const { s, e, ver } = p;
+    try { await post(`/api/tasks/${p.task}/pin`, { period: p.period, oldStart: p.srv, s, e }); p.srv = s; p.starts.add(s); }
+    catch (err) { toast(err.message); pend.current.delete(p); p.busy = false; redraw(x => x + 1); return; }
+    p.busy = false;
+    if (p.ver !== ver) { if (!p.t) flush(p); return; }
+    await load(['plan', 'tasks']);
+    if (p.ver === ver && !p.busy && !p.t) { pend.current.delete(p); redraw(x => x + 1); }
   };
-  const onUp = async () => {
+  const place = (it, s, e) => {
+    const srv = it.b.srv ?? it.b.s;
+    let p = pendFor({ key: it.b.key, s: srv });
+    if (!p) pend.current.add(p = { key: it.b.key, task: it.u.taskId, period: it.u.period || 0, starts: new Set([srv]), srv, ver: 0 });
+    p.s = s; p.e = e; p.ver++;
+    setSel(it.b.key + ':' + s); redraw(x => x + 1);
+    clearTimeout(p.t); p.t = setTimeout(() => flush(p), 600);
+  };
+  async function onUp() {
+    listen(false);
     const g = drag.current; drag.current = null; if (!g) return;
     const isEv = g.it.kind === 'event';
     if (g.tap) return who !== st.me.id ? (isEv ? null : openTask(g.it.u.taskId)) : isEv && !g.it.ev.editable ? eventSheet(g.it.ev) : setSel(selKey(g.it));
-    if (!g.moved) { setSel(null); return isEv ? eventSheet(g.it.ev) : blockSheet(g.it); }
-    setSel(null);
-    const shift = g.dm * 60000 + g.dd * 864e5;
-    if (!shift) { g.el.style.transform = ''; g.el.style.height = ''; g.el.classList.remove('drag'); return; }
+    const el = elOf(g);
+    if (!g.moved) { unpaint(el); setSel(null); return isEv ? eventSheet(g.it.ev) : blockSheet(g.it); }
+    const k = g.mode === 'move' ? g.dm * 60000 + g.dd * 864e5 : g.dm * 60000;
+    if (!k) return unpaint(el);
+    const s = g.mode === 'end' ? g.it.s : g.it.s + k, e = g.mode === 'start' ? g.it.e : g.it.e + k;
     if (isEv) {
-      const ev = g.it.ev, body = { start: g.resize ? ev.start : ev.start + shift, end: ev.end + shift };
-      if (ev.recurring && !(await confirmDialog(`Move only this “${ev.title}”?`, 'This Event'))) { g.el.style.transform = ''; g.el.style.height = ''; g.el.classList.remove('drag'); return; }
-      try { await patch('/api/events/' + ev.id, body); await load(['plan']); } catch (err) { toast(err.message); g.el.style.transform = ''; g.el.style.height = ''; }
-      return;
+      const ev = g.it.ev;
+      if (ev.recurring && !(await confirmDialog(`Move only this “${ev.title}”?`, 'This Event'))) return unpaint(el);
+      setSel(null);
+      try { await patch('/api/events/' + ev.id, { start: s, end: e }); await load(['plan']); } catch (err) { toast(err.message); }
+      return unpaint(elOf(g));
     }
-    try { await post(`/api/tasks/${g.it.u.taskId}/pin`, { period: g.it.u.period || 0, oldStart: g.it.s, s: g.resize ? g.it.s : g.it.s + shift, e: g.it.e + shift }); await load(['plan', 'tasks']); }
-    catch (err) { toast(err.message); g.el.style.transform = ''; }
-  };
+    unpaint(el); place(g.it, s, e);
+  }
   const moved = it => (plan?.moved || []).some(m => m.task_id === it.u.taskId && m.period === (it.u.period || 0));
   const blockSheet = async it => {
     if (!it.b.pinned && !moved(it)) return openTask(it.u.taskId);
@@ -287,9 +337,9 @@ export default function CalendarView() {
           <span class="et">${x.done ? html`<span class="kind">${I('check', 12)}</span>` : ''}${x.research ? 'Research · ' : ''}${x.t}</span><span class="em">${x.tick ? 'Done ' + hm(x.e1) : `${hm(x.s1)}–${hm(x.e1)}`}${n === 1 && x.p ? ' · ' + x.p : ''}</span></div>`;
         if (x.kind === 'block') { const cur = plan.active && plan.active.task_id === x.u.taskId, fit = Math.floor(((x.e - x.s) / 3600e3 * hh - 44) / 16), pts = n === 1 && fit > 0 ? partPoints(x.u.points, x.b.part, x.b.parts).slice(0, fit) : [];   // only as many points as fit
           return html`<div class=${'ev block' + (x.b.pinned ? ' pinned' : '') + (x.u.late ? ' late' : '') + (cur ? ' cur' : '') + (sel === selKey(x) ? ' sel' : '')} style=${{ ...style, background: x.u.p_color }}
-            onPointerDown=${e => onDown(e, x)} onPointerMove=${onMove} onPointerUp=${onUp} onPointerCancel=${onCancel} title=${`${x.u.title}\n${x.u.p_name}${x.u.late ? '\nAfter deadline' : ''}`}>
+            data-k=${selKey(x)} onPointerDown=${e => onDown(e, x)} title=${`${x.u.title}\n${x.u.p_name}${x.u.late ? '\nAfter deadline' : ''}`}>
             <span class="et">${x.u.meta?.win ? html`<span class="kind">${I('flex', 12)}</span>` : ''}${x.u.title}</span><span class="em">${hm(x.s)}–${hm(x.e)}${x.b.parts > 1 ? ` · ${x.b.part}/${x.b.parts}` : ''}${n === 1 && x.u.p_name ? ' · ' + x.u.p_name : ''}</span>
-            ${pts.length > 0 && html`<ul class="epts">${pts.map(p => html`<li>${p.t}</li>`)}</ul>`}<div class="rs"></div></div>`; }
+            <div class="rs rs-top"></div>${pts.length > 0 && html`<ul class="epts">${pts.map(p => html`<li>${p.t}</li>`)}</ul>`}<div class="rs"></div></div>`; }
         if (x.kind === 'event') {
           const ev = x.ev, part = (s0, e0) => ({ ...style, top: top(s0) + 'px', height: Math.max(4, (e0 - s0) / 3600e3 * hh - (e0 === x.e ? 2 : 0)) + 'px' });
           const bc = { '--bc': x.color || 'var(--faint)' }, open = () => eventSheet(ev);
@@ -297,8 +347,8 @@ export default function CalendarView() {
             ${x.s < x.s0 && html`<div class="ev buf b" style=${{ ...part(x.s, x.s0), ...bc }} onClick=${open} title=${ev.travel?.there ? `${dh(ev.travel.min)} by ${ev.travel.mode}` : dh(ev.before) + ' before'}>${(x.s0 - x.s) / 3600e3 * hh > 14 ? html`${ev.travel?.there ? html`<span class="way">${I(ev.travel.mode, 11)}</span>` : ''}${dh(ev.before)}` : ''}</div>`}
             ${(() => { const it = { kind: 'event', ev, s: ev.start, e: ev.end, b: { key: 'e' + ev.id, s: ev.start } };
               return html`<div class=${'ev busy' + (x.free ? ' free' : '') + (ev.before || ev.after ? ' hasb' : '') + (sel === selKey(it) ? ' sel' : '')} style=${{ ...part(x.s0, x.e0), ...bc, ...(x.color && !x.free ? { borderLeft: `3px solid ${x.color}` } : {}) }} title=${`${x.t}\n${x.cal}`}
-                onPointerDown=${e => onDown(e, it)} onPointerMove=${onMove} onPointerUp=${onUp} onPointerCancel=${onCancel}>
-                <span class="et"><span class="kind">${I('pin', 12)}</span>${x.t}<${AlsoDots} ev=${ev}/></span><span class="em">${hm(ev.start)}–${hm(ev.end)} · ${x.cal}</span>${ev.editable && html`<div class="rs"></div>`}</div>`; })()}
+                data-k=${selKey(it)} onPointerDown=${e => onDown(e, it)}>
+                <span class="et"><span class="kind">${I('pin', 12)}</span>${x.t}<${AlsoDots} ev=${ev}/></span><span class="em">${hm(ev.start)}–${hm(ev.end)} · ${x.cal}</span>${ev.editable && html`<div class="rs rs-top"></div><div class="rs"></div>`}</div>`; })()}
             ${x.e > x.e0 && html`<div class="ev buf a" style=${{ ...part(x.e0, x.e), ...bc }} onClick=${open} title=${ev.travel?.home ? `Home: ${dh(ev.travel.min)} by ${ev.travel.mode}` : dh(ev.after) + ' after'}>${(x.e - x.e0) / 3600e3 * hh > 14 ? html`${ev.travel?.home ? html`<span class="way">${I(ev.travel.mode, 11)}</span>` : ''}${dh(ev.after)}` : ''}</div>`}`;
         }
         return html`<div class=${'ev ' + x.kind} style=${style} title=${x.t}
