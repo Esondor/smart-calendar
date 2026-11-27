@@ -300,7 +300,7 @@ async function reconcile(uid, cal, desired, plan, now, endMs) {
       const path = `/calendars/${encodeURIComponent(cal.ext_id)}/events/${encodeURIComponent(x.ext_id)}`;
       // a flexible appointment marked done stays in the calendar as a normal appointment (title, place, notes): where it
       // was planned if that had begun (cut at now), else ending now; the app's marker goes, so it shows as an appointment
-      if (done && t.meta?.win && !t.recur) {
+      if (done && (t.meta?.win || t.meta?.appt) && !t.recur) {
         const m = Math.ceil(now / 60000) * 60000, len = x.end - x.start;
         let s = x.start, e = x.end;
         if (x.start >= now) { e = m; s = m - len; } else if (x.end > now) e = Math.max(m, x.start + 5 * 60000);

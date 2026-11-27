@@ -1,4 +1,4 @@
-import { html, useState, useEffect, S, api, post, patch, load, toast, openModal, askMinutes, startOfDay, addDays, hm, minsOf, dayLabel, DN, SH, dh, clock, n24, isoDate, fromIso, when, placeText } from './lib.js';
+import { html, useState, useEffect, S, api, post, patch, load, toast, openModal, askMinutes, startOfDay, addDays, hm, minsOf, dayLabel, DN, SH, dh, clock, n24, isoDate, fromIso, when, placeText, isAppt } from './lib.js';
 import { openTask } from './taskedit.js';
 import { I } from './icons.js';
 import { openEventSheet, finishEvent, ClashCard, AlsoDots } from './eventsheet.js';
@@ -224,7 +224,7 @@ export function Timeline({ plan, date, head = true }) {
     else { const u = unitOf(plan, x.bl.key); if (!u) return;
       const k = 'b' + x.bl.key + ':' + x.s;
       out.push(html`<li class=${(cur && cur.key === u.key && isT ? 'cur' : '') + (sel === k ? ' sel' : '')} style=${{ borderLeftColor: u.p_color }} onClick=${tap(k, () => blockSheet(u, x.bl))}>${line(x)}<span class="tm">${hm(x.s)}–${hm(x.e)}</span>
-        <span><input type="checkbox" style="margin-right:6px" onChange=${async () => { await post(`/api/tasks/${u.taskId}/done`, { period: u.period || 0 }); load(['plan', 'tasks']); }}/><span class="tx">${u.meta?.win ? html`<span class="kind" title="Flexible appointment">${I('flex', 12)}</span>` : ''}${u.title}</span>${x.bl.parts > 1 ? html` <span class="hint">(${x.bl.part}/${x.bl.parts})</span>` : ''}</span>
+        <span><input type="checkbox" style="margin-right:6px" onChange=${async () => { await post(`/api/tasks/${u.taskId}/done`, { period: u.period || 0 }); load(['plan', 'tasks']); }}/><span class="tx">${isAppt(u.meta) ? html`<span class="kind" title="Appointment">${I('flex', 12)}</span>` : ''}${u.title}</span>${x.bl.parts > 1 ? html` <span class="hint">(${x.bl.part}/${x.bl.parts})</span>` : ''}</span>
         <span class="dur" title="Planned time">${dh(u.duration)}</span></li>`); }
   });
   if (isT && !placed) out.push(html`<li class="nowline" data-t=${hm(now)}></li>`);

@@ -85,6 +85,9 @@ export const n24 = v => { v = String(v || '').trim().replace(/[.h]/, ':'); let h
   if (/^\d{1,2}$/.test(v)) { h = +v; m = 0; } else if (/^\d{3,4}$/.test(v)) { h = +v.slice(0, -2); m = +v.slice(-2); } else { const x = v.match(/^(\d{1,2}):(\d{1,2})$/); if (!x) return null; h = +x[1]; m = +x[2]; }
   return h <= 24 && m < 60 && !(h === 24 && m) ? `${pad(h)}:${pad(m)}` : null; };
 export const PRI = ['ASAP', 'High', 'Medium', 'Low'];
+// priority as a color: Low green → Medium yellow → High orange → ASAP red (0 … 3, in between as it rises towards its end date)
+export const priColor = p => `hsl(${Math.round(Math.max(0, Math.min(3, +p)) / 3 * 125)} 70% 42%)`;
+export const isAppt = m => !!(m?.win || m?.appt);
 // the place without web addresses (a meeting link is shown as the Join button instead)
 export const placeText = l => String(l || '').replace(/https?:\/\/\S+/g, '').replace(/^[\s,;·-]+|[\s,;·-]+$/g, '').trim();
 export const initials = n => String(n || '?').split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase();

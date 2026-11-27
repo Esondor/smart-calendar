@@ -404,7 +404,7 @@ export default async function apiRoutes(app) {
   app.get('/api/travel', async req => { try { return (await maps.travel(req.user.id, String(req.query.to || '').trim())) || {}; } catch (x) { throw httpErr(x.statusCode || 502, x.message); } });
   app.post('/api/flexible', async req => {
     const b = req.body || {};
-    try { return { id: createFlexible(req.user.id, { title: str(b.title, 300), minutes: int(b.minutes, 30), win: b.win && winOf(b.win), calendarId: int(b.calendar_id, 0) || null, startAfter: b.start_after, location: b.location, notes: b.notes, travel: int(b.travel, 0) }) }; }
+    try { return { id: createFlexible(req.user.id, { title: str(b.title, 300), minutes: int(b.minutes, 30), win: b.win && winOf(b.win), calendarId: int(b.calendar_id, 0) || null, startAfter: b.start_after, location: b.location, notes: b.notes, travel: int(b.travel, 0), deadline: b.deadline || null, priority: int(b.priority, 2), schedule: b.schedule || null }) }; }
     catch (x) { throw httpErr(400, x.message); }
   });
   app.post('/api/events/:id/to-task', async req => {
@@ -422,7 +422,7 @@ export default async function apiRoutes(app) {
   app.post('/api/events', async req => {
     const b = req.body || {}, start = int(b.start), end = int(b.end);
     if (!(end > start)) throw httpErr(400, 'End must be after start');
-    try { await google.createEvent(req.user.id, int(b.calendar_id), { title: str(b.title, 300), start, end, all_day: !!b.all_day, location: b.location ? str(b.location, 500) : null }); } catch (x) { gerr(x); }
+    try { await google.createEvent(req.user.id, int(b.calendar_id), { title: str(b.title, 300), start, end, all_day: !!b.all_day, location: b.location ? str(b.location, 500) : null, descr: b.notes ? str(b.notes, 4000) : null }); } catch (x) { gerr(x); }
     markDirty(req.user.id, true); return { ok: true };
   });
   // travel / blocked time before and after a calendar event; a recurring event shares it across the series
@@ -517,7 +517,7 @@ export default async function apiRoutes(app) {
   function unitOut(u, i = {}) {
     const t = u.t;
     return { key: u.key, taskId: t.id, period: u.period, title: t.title, notes: t.notes, points: t.points, meta: t.meta, project_id: t.project_id, p_name: t.p_name, p_color: calColor(t.meta?.calendarId) || t.p_color,
-      priority: t.priority, duration: t.duration, spent: u.spent, deadline: u.deadline, overdue: !!u.overdue, recur: !!t.recur, periodStart: u.periodStart, periodEnd: u.periodEnd,
+      priority: t.priority, pri: u.pri ?? t.priority, duration: t.duration, spent: u.spent, deadline: u.deadline, overdue: !!u.overdue, recur: !!t.recur, periodStart: u.periodStart, periodEnd: u.periodEnd,
       parent_id: t.parent_id, first: i.first || null, end: i.end || null, late: !!i.late, unplaced: i.unplaced || 0, auto: t.auto, ext_source: t.ext_source };
   }
 

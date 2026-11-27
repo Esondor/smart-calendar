@@ -1,8 +1,8 @@
-import { html, useState, useEffect, useLayoutEffect, useRef, S, api, post, patch, load, toast, openModal, confirmDialog, startOfDay, addDays, hm, DN, SH, dh, isoDate, fromIso, n24 } from './lib.js';
+import { html, useState, useEffect, useLayoutEffect, useRef, S, api, post, patch, load, toast, openModal, confirmDialog, startOfDay, addDays, hm, DN, SH, dh, isoDate, fromIso, n24, priColor, isAppt } from './lib.js';
 import { openTask } from './taskedit.js';
 import { I } from './icons.js';
 import { blockTime } from './now.js';
-import { openEventSheet, EventFields, googleCals, atTime, AlsoDots, newFlexible } from './eventsheet.js';
+import { openEventSheet, EventFields, googleCals, atTime, AlsoDots, newAppointment } from './eventsheet.js';
 
 const H0 = 0, H1 = 24;   // the whole day, 00:00 to 24:00
 const WIN = 63, SHIFT = 28;            // day strip: 9 weeks rendered, moved by 4 weeks near an edge
@@ -26,24 +26,12 @@ function lanes(items) {   // side-by-side layout for overlapping items
 export async function newMenu({ at = null, project_id } = {}) {
   const v = await openModal(close => html`<div class="modal sm"><h3>${at ? `${DN[new Date(at).getDay()]} ${SH(at)}, ${hm(at)}` : 'New'}</h3><div class="menu">
     <button onClick=${() => close('task')}>${I('list')}Task</button>
-    ${googleCals().length > 0 && html`<button onClick=${() => close('event')}>${I('calendar')}Appointment</button>`}
-    <button onClick=${() => close('flex')}>${I('clock')}Flexible Appointment</button>
+    <button onClick=${() => close('appt')}>${I('calendar')}Appointment</button>
     <button onClick=${() => close('break')}>${I('cup')}Break / Block Time</button></div>
     <div class="acts"><button onClick=${() => close(null)}>Cancel</button></div></div>`);
   if (v === 'task') { const t = await openTask('new', project_id ? { project_id } : {}); if (at && t?.id) { await post(`/api/tasks/${t.id}/pin`, { period: t.period || 0, s: at, e: at + (t.duration || 30) * 60000 }); load(['plan']); } }
-  if (v === 'event') newEvent(at || undefined);
-  if (v === 'flex') newFlexible(at);
+  if (v === 'appt') newAppointment(at);
   if (v === 'break') blockTime(at);
-}
-export async function newEvent(ms) {
-  const cals = googleCals(); if (!cals.length) return toast('Connect Google to add events');
-  const r = await openModal(close => { const B = () => { const s0 = ms || Math.ceil(Date.now() / 900000) * 900000;
-    const [f, setF] = useState({ title: '', all_day: false, day: isoDate(s0), s: hm(s0), e: hm(s0 + 3600e3), cal: (cals.find(c => c.use_busy) || cals[0]).id, location: '' });
-    return html`<div class="modal sm"><h3>New Event</h3><${EventFields} f=${f} set=${x => setF({ ...f, ...x })} cals=${cals}/>
-      <div class="acts"><button onClick=${() => close(null)}>Cancel</button><button class="pri" disabled=${!f.title.trim()} onClick=${() => close(f)}>Add</button></div></div>`; }; return html`<${B}/>`; });
-  if (!r) return;
-  const start = r.all_day ? fromIso(r.day) : atTime(r.day, r.s), end = r.all_day ? addDays(fromIso(r.day), 1) : atTime(r.day, r.e);
-  try { await post('/api/events', { calendar_id: r.cal, title: r.title.trim(), start, end, all_day: r.all_day, location: (r.location || '').trim() }); await load(['plan']); toast('Event added'); } catch (e) { toast(e.message); }
 }
 const store = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const stored = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
@@ -386,9 +374,10 @@ export default function CalendarView() {
         if (x.kind === 'past') return html`<div class=${'ev past' + (x.done ? ' dn' : '')} style=${{ ...style, '--c': x.c || 'var(--done)' }} title=${`${x.t}${x.p ? '\n' + x.p : ''}\n${x.tick ? 'Done ' + hm(x.e1) : hm(x.s1) + '–' + hm(x.e1)}`} onClick=${x.task ? () => openTask(x.task) : null}>
           <span class="et"><span class="kind">${I('check', 12)}</span>${x.research ? 'Research · ' : ''}${x.t}</span><span class="em">${x.tick ? 'Done ' + hm(x.e1) : `${hm(x.s1)}–${hm(x.e1)}`}${n === 1 && x.p ? ' · ' + x.p : ''}</span></div>`;
         if (x.kind === 'block') { const cur = plan.active && plan.active.task_id === x.u.taskId, fit = Math.floor(((x.e - x.s) / 3600e3 * hh - 44) / 16), pts = n === 1 && fit > 0 ? partPoints(x.u.points, x.b.part, x.b.parts).slice(0, fit) : [];   // only as many points as fit
-          return html`<div class=${'ev block' + (x.b.pinned ? ' pinned' : '') + (x.u.late ? ' late' : '') + (cur ? ' cur' : '') + (sel === selKey(x) ? ' sel' : '')} style=${{ ...style, background: x.u.p_color }}
-            data-k=${selKey(x)} onPointerDown=${e => onDown(e, x)} title=${`${x.u.title}\n${x.u.p_name}${x.u.late ? '\nAfter deadline' : ''}`}>
-            <span class="et">${x.u.meta?.win ? html`<span class="kind">${I('flex', 12)}</span>` : ''}${x.u.title}</span><span class="em">${hm(x.s)}–${hm(x.e)}${x.b.parts > 1 ? ` · ${x.b.part}/${x.b.parts}` : ''}${n === 1 && x.u.p_name ? ' · ' + x.u.p_name : ''}</span>
+          const ap = isAppt(x.u.meta), pc = priColor(x.u.pri ?? x.u.priority);   // a task in its priority's color; an appointment in its calendar's, the priority at its edge
+          return html`<div class=${'ev block' + (x.b.pinned ? ' pinned' : '') + (x.u.late ? ' late' : '') + (cur ? ' cur' : '') + (sel === selKey(x) ? ' sel' : '')} style=${{ ...style, background: ap ? x.u.p_color : pc, ...(ap ? { borderLeft: `4px solid ${pc}` } : {}) }}
+            data-k=${selKey(x)} onPointerDown=${e => onDown(e, x)} title=${`${x.u.title}\n${x.u.p_name}${x.u.late ? '\nAfter deadline' : ''}\nPriority ${['ASAP', 'High', 'Medium', 'Low'][Math.round(x.u.pri ?? x.u.priority)]}`}>
+            <span class="et">${isAppt(x.u.meta) ? html`<span class="kind">${I('flex', 12)}</span>` : ''}${x.u.title}</span><span class="em">${hm(x.s)}–${hm(x.e)}${x.b.parts > 1 ? ` · ${x.b.part}/${x.b.parts}` : ''}${n === 1 && x.u.p_name ? ' · ' + x.u.p_name : ''}</span>
             <div class="rs rs-top"></div>${pts.length > 0 && html`<ul class="epts">${pts.map(p => html`<li>${p.t}</li>`)}</ul>`}<div class="rs"></div></div>`; }
         if (x.kind === 'event') {
           const ev = x.ev, part = (s0, e0) => ({ ...style, top: top(s0) + 'px', height: Math.max(4, (e0 - s0) / 3600e3 * hh - (e0 === x.e ? 2 : 0)) + 'px' });

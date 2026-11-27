@@ -53,14 +53,18 @@ export function eventToTask(uid, ev, { kind = 'flex', minutes = null, win = null
 }
 
 // a flexible appointment made in the app (+ → Flexible Appointment): planned inside its window, written to the chosen calendar
-export function createFlexible(uid, { title, minutes, win, calendarId, startAfter, location, notes, travel }) {
+// a planned appointment: a duration, planned in a window (days, between times) or in work / personal hours, from a
+// day on and by an end date if given; written to its calendar (or the plan calendar) and kept in sync there
+export function createFlexible(uid, { title, minutes, win, calendarId, startAfter, location, notes, travel, deadline = null, priority = 2, schedule = null }) {
   const pid = appointmentsProject(uid);
   if (calendarId && !get(`SELECT 1 FROM calendars c JOIN accounts a ON a.id = c.account_id WHERE c.id = ? AND c.user_id = ? AND c.writable = 1 AND a.kind = 'google'`, calendarId, uid)) throw new Error('Choose one of your Google calendars');
   const now = Date.now(), sort = (get('SELECT MAX(sort) AS m FROM tasks WHERE project_id = ?', pid).m || 0) + 1;
-  const meta = { ...(win ? { win } : {}), ...(calendarId ? { calendarId: +calendarId } : {}), ...(+travel > 0 ? { travel: Math.min(180, Math.round(+travel)) } : {}) };
-  const id = Number(run(`INSERT INTO tasks(project_id, title, notes, duration, created_by, assignee_id, created_at, updated_at, start_after, location, meta, auto, sort)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`, pid, String(title || '').trim().slice(0, 300) || 'Appointment', String(notes || '').slice(0, 4000), Math.max(5, Math.min(24 * 60, +minutes || 30)),
-    uid, uid, now, now, startAfter && /^\d{4}-\d\d-\d\d$/.test(startAfter) ? startAfter : isoDate(now), location ? String(location).slice(0, 300) : null, JSON.stringify(meta), sort).lastInsertRowid);
+  const meta = { appt: 1, ...(win ? { win } : {}), ...(calendarId ? { calendarId: +calendarId } : {}), ...(+travel > 0 ? { travel: Math.min(180, Math.round(+travel)) } : {}) };
+  const day = d => d && /^\d{4}-\d\d-\d\d$/.test(d) ? d : null;
+  const id = Number(run(`INSERT INTO tasks(project_id, title, notes, duration, created_by, assignee_id, created_at, updated_at, start_after, location, meta, auto, sort, deadline, priority, schedule)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`, pid, String(title || '').trim().slice(0, 300) || 'Appointment', String(notes || '').slice(0, 4000), Math.max(5, Math.min(24 * 60, +minutes || 30)),
+    uid, uid, now, now, startAfter && /^\d{4}-\d\d-\d\d$/.test(startAfter) ? startAfter : isoDate(now), location ? String(location).slice(0, 300) : null, JSON.stringify(meta), sort,
+    day(deadline), Number.isFinite(+priority) ? Math.max(0, Math.min(3, Math.round(+priority))) : 2, schedule ? String(schedule).slice(0, 40) : null).lastInsertRowid);
   markDirty(uid);
   return id;
 }

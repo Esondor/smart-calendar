@@ -1,4 +1,4 @@
-import { html, useState, S, post, load, toast, startOfDay, addDays, when, dh, hm, Avatar, projectById, recurText, PRI, SH, fromIso } from './lib.js';
+import { html, useState, S, post, load, toast, startOfDay, addDays, when, dh, hm, Avatar, projectById, recurText, PRI, SH, fromIso, priColor, isAppt } from './lib.js';
 import { openTask } from './taskedit.js';
 import { I } from './icons.js';
 
@@ -11,9 +11,9 @@ export function TaskRow({ t, showProject = true }) {
   const dl = t.deadline ? fromIso(t.deadline) : null;
   return html`<div class=${'trow' + (done ? ' done' : '')} onClick=${() => openTask(t.id)}>
     <input type="checkbox" checked=${done} onClick=${toggle}/>
-    <span class="tt">${t.priority < 2 && !done ? html`<span class=${'flag p' + t.priority} title=${PRI[t.priority]}></span>` : ''}${t.title}${t.recur ? html`<small>${I('repeat', 13)}</small>` : ''}${t.points?.length ? html`<small>${t.points.filter(x => x.done).length}/${t.points.length}</small>` : ''}</span>
+    <span class="tt">${!done ? html`<span class="flag" style=${{ background: priColor(t.priority) }} title=${PRI[t.priority]}></span>` : ''}${t.title}${t.recur ? html`<small>${I('repeat', 13)}</small>` : ''}${t.points?.length ? html`<small>${t.points.filter(x => x.done).length}/${t.points.length}</small>` : ''}</span>
     <span class="meta">
-      ${showProject && p && html`<span class="row" style="gap:5px;flex-wrap:nowrap"><span class="flag" style=${{ background: calColor(t.meta?.calendarId) || p.color }}></span>${p.name}</span>`}${t.meta?.win ? html`<span class="kind" title="Flexible appointment">${I('flex', 13)}</span>` : ''}
+      ${showProject && p && html`<span class="row" style="gap:5px;flex-wrap:nowrap"><span class="flag" style=${{ background: calColor(t.meta?.calendarId) || p.color }}></span>${p.name}</span>`}${isAppt(t.meta) ? html`<span class="kind" title="Appointment">${I('flex', 13)}</span>` : ''}
       <span>${dh(s?.remaining && s.remaining < t.duration ? s.remaining : t.duration)}</span>
       ${dl && html`<span class=${'chip' + (s?.late ? ' late' : dl < addDays(startOfDay(Date.now()), 2) ? ' warn' : '')}>Due ${SH(dl)}</span>`}
       ${(s?.user || t.assignee_id) && html`<${Avatar} id=${s?.user || t.assignee_id}/>`}

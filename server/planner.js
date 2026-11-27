@@ -276,17 +276,29 @@ function applyProjectOrder(units, actKey) {
   return units;
 }
 
-const PRI_BOOST = u => (u.overdue ? -1 : 0);
+// the priority it is planned with: its own, rising towards ASAP as its end date comes near (by the days to spare once
+// the work left is done, about 4 h of it a day): 3 weeks or more as set, a week → High at most, 2 days → ASAP. Overdue: ASAP.
+// Repeating tasks keep theirs (each round has an end). 0 = ASAP … 3 = Low, in steps of 0.1 (the color shows it).
+export function effPri(u, now = Date.now()) {
+  let p = Math.max(0, Math.min(3, +u.t.priority));
+  if (u.overdue) p = 0;
+  else if (u.hardDeadline && u.period == null && u.deadline) {
+    const left = Math.max(0, (u.t.duration || 0) - (u.spent || 0)) / 60, slack = (u.deadline - now) / 864e5 - left / 4;
+    p = Math.min(p, slack <= 0 ? 0 : slack < 2 ? slack / 2 : slack < 7 ? 1 + (slack - 2) / 5 : slack < 21 ? 2 + (slack - 7) / 14 : 3);
+  }
+  return Math.round(p * 10) / 10;
+}
 // a task's own window (an appointment: "the practice is open Mon–Fri 08:00–11:00"); invalid → none
 export const winOf = w => w && Array.isArray(w.days) && w.days.length && /^\d\d:\d\d$/.test(w.s) && /^\d\d:\d\d$/.test(w.e) && w.e > w.s ? { days: w.days.map(Number), s: w.s, e: w.e } : null;
 export function orderUnits(units, uid) {
   const act = get('SELECT task_id, period FROM active WHERE user_id = ?', uid);
   const actKey = act ? (units.find(u => u.t.id === act.task_id && (u.period || 0) === act.period) || {}).key : null;
+  const now = Date.now(); for (const u of units) u.pri = effPri(u, now);
   units.sort((a, b) =>
     ((b.key === actKey) - (a.key === actKey)) ||
     ((a.t.do_next ? 0 : 1) - (b.t.do_next ? 0 : 1)) || ((a.t.do_next || 0) - (b.t.do_next || 0)) ||
     ((winOf(a.t.meta?.win) ? 0 : 1) - (winOf(b.t.meta?.win) ? 0 : 1)) ||   // appointments first: as soon as possible, they take their slot before flexible work
-    ((a.t.priority + PRI_BOOST(a)) - (b.t.priority + PRI_BOOST(b))) ||
+    (a.pri - b.pri) ||
     ((a.hardDeadline ? a.deadline : Infinity) - (b.hardDeadline ? b.deadline : Infinity)) ||
     (a.t.p_sort - b.t.p_sort) || (a.t.project_id - b.t.project_id) ||
     (a.t.grp - b.t.grp) || (a.t.sort - b.t.sort) || (a.t.id - b.t.id) || ((a.period || 0) - (b.period || 0)));
