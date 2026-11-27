@@ -1,9 +1,9 @@
 // Routes of the notification center, booking links (yours and the public page) and group booking in a project.
 import { all, get, run } from './db.js';
 import { httpErr } from './auth.js';
-import { isMember } from './models.js';
+import { isMember, contactsOf } from './models.js';
 import { listClashes, dismissClash, userTag } from './conflicts.js';
-import { findSlots, inboxOf, answerBooking, answerHold, saveLink, linkOut, linkByToken, book, bookGroup } from './booking.js';
+import { findSlots, checkTime, inboxOf, answerBooking, answerHold, saveLink, linkOut, linkByToken, book, bookGroup, bookWith } from './booking.js';
 import { notifyUsers } from './bus.js';
 
 const int = (v, d) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : d; };
@@ -52,6 +52,26 @@ export default async function bookingRoutes(app) {
     const b = req.body || {}, pid = +req.params.id, who = members(req.user.id, pid, b.members), s = int(b.start, 0), e = int(b.end, 0);
     if (!(s > Date.now() && e > s)) throw httpErr(400, 'Invalid time');
     return bookGroup(req.user.id, pid, { title: b.title, members: who, start: s, end: e });
+  });
+
+  // ---------- an appointment with people you know (you share a project, or you invited them): their calendars count too ----------
+  const people = (uid, list) => { const ok = new Set(contactsOf(uid).map(u => u.id)); const L = [...new Set((Array.isArray(list) ? list : []).map(Number))].filter(u => u !== uid);
+    if (L.some(u => !ok.has(u))) throw httpErr(404, 'Not one of your contacts'); return L; };
+  app.get('/api/people', async req => contactsOf(req.user.id).filter(u => u.id !== req.user.id).map(u => ({ id: u.id, name: u.name, color: u.color })));
+  // is everyone free then? (only yes / no per person, nothing of their calendars)
+  app.post('/api/people/check', async req => {
+    const b = req.body || {}, L = people(req.user.id, b.members), s = int(b.start, 0), e = int(b.end, 0);
+    return { busy: L.filter(u => !checkTime(u, s, e, 'all').ok), meBusy: !checkTime(req.user.id, s, e, 'all').ok };
+  });
+  app.post('/api/people/slots', async req => {
+    const b = req.body || {}, L = people(req.user.id, b.members);
+    return findSlots([req.user.id, ...L], { minutes: Math.max(5, Math.min(480, int(b.minutes, 60))), days: Math.max(1, Math.min(60, int(b.days, 21))), hours: String(b.hours || 'all'),
+      notice: 30, urgent: !!b.urgent, perDay: int(b.perDay, 3), max: int(b.max, 18), after: int(b.after, 0), until: int(b.until, 0), win: b.win || null });
+  });
+  app.post('/api/people/book', async req => {
+    const b = req.body || {}, L = people(req.user.id, b.members), s = int(b.start, 0), e = int(b.end, 0);
+    if (!(s > Date.now() - 60000 && e > s)) throw httpErr(400, 'Invalid time');
+    return bookWith(req.user.id, { title: b.title, members: L, start: s, end: e, calendarId: int(b.calendar_id, 0) || null, location: b.location || null, notes: b.notes || null });
   });
 
   // ---------- the public booking page (no sign-in; only free times, never what is in your calendar) ----------

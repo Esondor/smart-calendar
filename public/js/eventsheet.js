@@ -223,20 +223,32 @@ export async function newAppointment(at = null, end = null, pre = {}) {
       all_day: false, block: true, minutes: end ? Math.round((t1 - t0) / 60000) : 30, when: (at && hoursAt(at)) || (names.includes('personal') ? 'personal' : names[0]), win: false, days: [1, 2, 3, 4, 5], ws: '08:00', we: '11:00',
       priority: 2, cal: cals.length ? String((cals.find(c => String(c.id) === lastUsed('cal')) || cals.find(c => c.use_busy) || cals[0]).id) : '', location: pre.place || '', travel: 0, notes: pre.notes || '' });
     const set = x => setF({ ...f, ...x }), plan = f.plan;
+    const [ppl, setPpl] = useState(null), [av, setAv] = useState(null), [sug, setSug] = useState(null), W = f.with || [];
+    useEffect(() => { api('/api/people').then(setPpl).catch(() => setPpl([])); }, []);
     // moving the start keeps the length; the end never before the start
     const setStart = x => { const n = { ...f, ...x }; if (!plan) { const len = atTime(f.ed, f.et || '00:00') - atTime(f.sd, f.st || '00:00'), e = atTime(n.sd, n.st || '00:00') + Math.max(len, 15 * 60000); n.ed = isoDate(e); n.et = hm(e); } setF(n); };
     const s = atTime(f.sd, f.st || '00:00'), e = plan ? (f.dd ? atTime(f.dd, f.dt || '23:59') : null) : f.all_day ? fromIso(f.ed) : atTime(f.ed, f.et || '00:00');
+    // with people at a time: are you all free then? (only yes / no per person); if not, times when you all are
+    useEffect(() => { setAv(null); setSug(null); if (plan || !W.length || f.all_day || !(e > s)) return; const t = setTimeout(() => post('/api/people/check', { members: W, start: s, end: e }).then(setAv).catch(() => {}), 250); return () => clearTimeout(t); }, [W.join(), s, e, plan, f.all_day]);
+    const findTimes = () => post('/api/people/slots', { members: W, minutes: Math.round((e - s) / 60000), after: Math.max(Date.now(), fromIso(f.sd)), days: 10, perDay: 4, max: 12 }).then(setSug).catch(x => toast(x.message));
+    const pick = x => { setF({ ...f, sd: isoDate(x.s), st: hm(x.s), ed: isoDate(x.e), et: hm(x.e) }); setSug(null); };
+    const nameOf = id => (ppl || []).find(u => u.id === id)?.name.split(' ')[0] || '';
     // what is still missing: shown in red once you press Add
     const miss = new Set([!f.title.trim() && 'title', plan && f.win && !f.days.length && 'days', plan && f.win && f.we <= f.ws && 'between', plan && e && e <= s && 'due',
       !plan && (f.all_day ? f.ed < f.sd : !(e > s)) && 'end'].filter(Boolean)), ok = !miss.size, bad = k => f.tried && miss.has(k) ? ' bad' : '';
     return html`<div class="modal sm appt"><input type="text" class=${'ttl' + bad('title')} placeholder="Title" value=${f.title} onInput=${x => set({ title: x.target.value })}/>
-      ${cals.length > 0 && html`<div style="margin-top:12px"><${Switch2} a="Time" b="Planned" right=${plan} set=${v => set({ plan: v })}/></div>`}
+      ${(cals.length > 0 || W.length > 0) && html`<div style="margin-top:12px"><${Switch2} a="Time" b="Planned" right=${plan} set=${v => set({ plan: v })}/></div>`}
       <div class="box" style="margin-top:12px">
+        ${ppl?.length > 0 && html`<div class="cell ncell"><span>With</span><div class="chips">${ppl.map(u => html`<button type="button" class=${'chipb' + (W.includes(u.id) ? ' on' : '')} onClick=${() => set({ with: W.includes(u.id) ? W.filter(x => x !== u.id) : [...W, u.id] })}>${u.name}</button>`)}</div></div>`}
         <div class=${'cell two' + bad('due') + bad('end')}><div><span class="lbl">Start</span><${DateTime} d=${f.sd} t=${f.st} empty=${!plan && f.all_day} setD=${v => setStart({ sd: v })} setT=${v => setStart({ st: v || f.st })}/></div>
           <div><span class="lbl">${plan ? 'Due' : 'End'}${plan && f.dd && html`<button type="button" class="icon" title="No due date" onClick=${() => set({ dd: '', dt: '' })}>${I('x', 13)}</button>`}</span>${plan
             ? html`<div class="dt">${f.dd ? html`<input type="date" value=${f.dd} min=${f.sd} onInput=${x => set({ dd: x.target.value })}/><div class="tm"><input class="t24" value=${f.dt} placeholder="--:--" onChange=${x => set({ dt: n24(x.target.value) || '' })}/></div>`
               : html`<button type="button" class="none" onClick=${() => set({ dd: f.sd })}>None</button>`}</div>`
             : html`<${DateTime} d=${f.ed} t=${f.et} empty=${f.all_day} setD=${v => set({ ed: v })} setT=${v => set({ et: v || f.et })}/>`}</div></div>
+        ${!plan && W.length > 0 && av && html`<div class=${'cell avail' + (av.busy.length || av.meBusy ? ' no' : '')}><span>${av.busy.length || av.meBusy ? [av.meBusy && 'You', ...av.busy.map(nameOf)].filter(Boolean).join(', ') + (av.busy.length + (av.meBusy ? 1 : 0) > 1 ? ' are' : ' is') + ' busy then' : 'Everyone is free'}</span>
+          <button type="button" class="ghost" onClick=${findTimes}>Find Times</button></div>`}
+        ${sug && html`<div class="cell"><div class="slots" style="margin:0;width:100%">${!sug.length ? html`<span class="hint">No time when everyone is free</span>` : (() => { const D = []; for (const x of sug) { const k = new Date(x.s).toDateString(); let d = D.find(y => y.k === k); if (!d) D.push(d = { k, s: x.s, L: [] }); d.L.push(x); }
+          return D.map(d => html`<div class="tday">${DN[new Date(d.s).getDay()]} ${SH(d.s)}</div><div class="srow">${d.L.map(x => html`<button type="button" class=${'slot ' + x.fit} onClick=${() => pick(x)}>${hm(x.s)}</button>`)}</div>`); })()}</div></div>`}
         ${!plan ? html`
           <label class="cell"><span>All day</span><input type="checkbox" checked=${f.all_day} onChange=${x => set({ all_day: x.target.checked, block: !x.target.checked, ed: x.target.checked ? f.sd : f.ed })}/></label>
           <label class="cell"><span>Blocks time</span><input type="checkbox" checked=${f.block} onChange=${x => set({ block: x.target.checked })}/></label>`
@@ -256,6 +268,16 @@ export async function newAppointment(at = null, end = null, pre = {}) {
   if (!r) return;
   lastUsed('cal', r.cal);
   try {
+    if (r.with?.length) {
+      let s = r.s, e = r.e;
+      if (r.plan) {
+        const [x] = await post('/api/people/slots', { members: r.with, minutes: r.minutes, hours: r.win ? 'all' : r.when, win: r.win ? { days: r.days, s: r.ws, e: r.we } : null, after: r.s, until: e || 0, perDay: 1, max: 1, urgent: true });
+        if (!x) return toast('No time when everyone is free');
+        s = x.s; e = x.e;
+      }
+      await post('/api/people/book', { title: r.title.trim(), members: r.with, start: s, end: e, calendar_id: +r.cal || null, location: r.location.trim() || null, notes: r.notes.trim() || null });
+      await load(['plan']); toast(`Booked ${DN[new Date(s).getDay()]} ${SH(s)}, ${hm(s)}`); return;
+    }
     if (!r.plan) {
       await post('/api/events', { calendar_id: +r.cal, title: r.title.trim(), all_day: r.all_day, start: r.all_day ? fromIso(r.sd) : r.s, end: r.all_day ? addDays(fromIso(r.ed), 1) : r.e,
         location: r.location.trim() || null, notes: r.notes.trim() || null, free: !r.block });

@@ -37,13 +37,14 @@ function ctx(uid, from, to) {
 }
 // suggested times: for each person their hours (or all), free of anything fixed; best first, at most `perDay` a day,
 // at least an hour apart, earliest days first; urgent: the "good" ones (tasks moved) count as much as the best
-export function findSlots(uids, { minutes, days = 21, hours = 'work', notice = 120, now = Date.now(), urgent = false, perDay = 3, max = 24 }) {
-  const need = minutes * 60000, from = now + notice * 60000, to = dayStart(addDays(isoDate(now), days + 1));
-  const C = uids.map(u => ctx(u, now, to)), out = [];
+export function findSlots(uids, { minutes, days = 21, hours = 'work', notice = 120, now = Date.now(), urgent = false, perDay = 3, max = 24, after = 0, until = 0, win = null }) {
+  const need = minutes * 60000, from = Math.max(now + notice * 60000, after || 0), to = until || dayStart(addDays(isoDate(now), days + 1));
+  const C = uids.map(u => ctx(u, now, to)), out = [], w = win && Array.isArray(win.days) && win.s && win.e ? win : null;
   for (let d = isoDate(from); dayStart(d) < to && out.length < max; d = addDays(d, 1)) {
     // the hours everyone has that day (hours of each person, intersected)
-    let win = hoursOn(C[0].s, hours, d);
-    for (const c of C.slice(1)) { const h = hoursOn(c.s, hours, d); win = win.flatMap(([a, b]) => h.map(([x, y]) => [Math.max(a, x), Math.min(b, y)])).filter(([a, b]) => b > a); }
+    // a window of its own (between times, on some days) instead of the hours
+    let win = w ? (w.days.includes(wd(d)) ? [[at(d, tm(w.s)), at(d, tm(w.e))]] : []) : hoursOn(C[0].s, hours, d);
+    for (const c of w ? [] : C.slice(1)) { const h = hoursOn(c.s, hours, d); win = win.flatMap(([a, b]) => h.map(([x, y]) => [Math.max(a, x), Math.min(b, y)])).filter(([a, b]) => b > a); }
     const day = [];
     for (const [a, b] of win) for (let t = Math.ceil(Math.max(a, from) / STEP) * STEP; t + need <= b; t += STEP) {
       const fits = C.map((c, i) => fitFor(uids[i], t, t + need, c.busy, c.blocks)); if (fits.includes(null)) continue;
@@ -121,17 +122,24 @@ export async function answerBooking(uid, id, yes) {
 }
 
 // ---------- a time for several members of a project ----------
-export function bookGroup(organizer, pid, { title, members, start, end }) {
-  const names = new Map(membersOf(pid).map(m => [m.id, m.name])), who = members.filter(m => names.has(m));
-  const chk = who.map(u => checkTime(u, start, end, 'all'));
-  if (chk.some(c => !c.ok)) throw Object.assign(new Error('Not everyone is free then any more'), { statusCode: 409 });
+export async function bookWith(organizer, { title, members, start, end, calendarId = null, location = null, notes = null }) {
+  const who = [...new Set([organizer, ...members])], names = new Map(all(`SELECT id, name FROM users WHERE id IN (${who.map(() => '?').join(',')})`, ...who).map(u => [u.id, u.name]));
+  const busy = who.filter(u => !checkTime(u, start, end, 'all').ok);
+  if (busy.length) throw Object.assign(new Error(`${busy.map(u => u === organizer ? 'You are' : (names.get(u) || '').split(' ')[0] + ' is').join(', ')} not free then`), { statusCode: 409 });
   const t = String(title || 'Meeting').trim().slice(0, 120) || 'Meeting', org = names.get(organizer) || '';
-  for (const u of who) {
+  let mine = false;
+  if (calendarId) { try { await google.createEvent(organizer, calendarId, { title: t, start, end, location: location || null, descr: notes || null }); mine = true; markDirty(organizer, true); } catch { /* below */ } }
+  if (!mine) addAppt(organizer, start, end, t, 'appt');
+  for (const u of who) if (u !== organizer) {
     const appt = addAppt(u, start, end, t, 'appt');
-    if (u !== organizer) addInbox(u, 'hold', `${org} booked “${t}” for you`, when(start), { appt, organizer, title: t, start }, 'partner');
+    addInbox(u, 'hold', `${org} booked “${t}” with you`, when(start) + (location ? ' · ' + location : ''), { appt, organizer, title: t, start }, 'partner');
   }
   return { ok: true };
 }
+export const bookGroup = (organizer, pid, { title, members, start, end }) => {
+  const ok = new Set(membersOf(pid).map(m => m.id));
+  return bookWith(organizer, { title, members: members.filter(m => ok.has(m)), start, end });
+};
 export function answerHold(uid, row, yes) {
   if (yes) return true;
   run(`DELETE FROM appts WHERE id = ? AND user_id = ?`, row.data.appt, uid); markDirty(uid, true);

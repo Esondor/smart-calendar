@@ -1198,3 +1198,10 @@ aside.files .box.clash{margin:0 0 8px}
 .modal input.quick{width:100%;box-sizing:border-box;margin:4px 0 8px;font-size:16px}
 .qprev{width:100%;justify-content:space-between;margin:0 0 10px;background:var(--acc-s);color:var(--acc);font-weight:500;text-align:left}
 .box>button.cell.addrow{width:100%;background:none;border-radius:0;color:var(--acc);justify-content:flex-start;padding-left:16px}
+
+/* an appointment with people: who (chips), whether all are free then, times when you all are */
+.chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.chipb{padding:5px 12px;border-radius:999px;background:var(--fill);color:var(--ink);font-size:13px;min-height:0}
+.chipb.on{background:var(--acc);color:#fff}
+.cell.avail span{color:var(--done);font-size:13.5px}.cell.avail.no span{color:var(--late)}
+.cell.avail .ghost{padding:4px 10px;font-size:13px;min-height:0}

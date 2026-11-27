@@ -78,3 +78,20 @@ test('Clear All: what needs no answer goes, requests to answer stay', async () =
   assert.ok(r.items.every(x => x.kind === 'booking' || x.kind === 'hold'));
   assert.ok(r.items.some(x => x.title === 'Asks'));
 });
+
+test('an appointment with people you know: free for both, booked for both; strangers are not asked', async () => {
+  const zoe = mkUser('zoe', '09:00', '18:00');   // shares nothing with Mara
+  const ppl = (await call(me, 'GET', '/api/people')).j.map(u => u.id);
+  assert.ok(ppl.includes(bo) && !ppl.includes(zoe), 'Bo shares a project with Mara, Zoe does not');
+  assert.equal((await call(me, 'POST', '/api/people/check', { members: [zoe], start: at('14:00'), end: at('15:00') })).code, 404);
+  A.addAppt(bo, at('14:00'), at('15:00'), 'Bo busy', 'appt');
+  const c = (await call(me, 'POST', '/api/people/check', { members: [bo], start: at('14:00'), end: at('15:00') })).j;
+  assert.deepEqual(c.busy, [bo]);
+  // planned: within a start and a due, the first time both are free
+  const S = (await call(me, 'POST', '/api/people/slots', { members: [bo], minutes: 60, after: at('13:00'), until: at('17:00'), perDay: 10 })).j;
+  assert.ok(S.length && S.every(x => x.s >= at('13:00') && x.e <= at('17:00') && !(x.s < at('15:00') && x.e > at('14:00'))), JSON.stringify(S.map(x => new Date(x.s).toTimeString().slice(0, 5))));
+  const r = await call(me, 'POST', '/api/people/book', { title: 'Lunch talk', members: [bo], start: S[0].s, end: S[0].e });
+  assert.equal(r.j.ok, true);
+  assert.ok(get(`SELECT 1 FROM appts WHERE user_id = ? AND start = ? AND title = 'Lunch talk'`, me, S[0].s) && get(`SELECT 1 FROM appts WHERE user_id = ? AND start = ? AND title = 'Lunch talk'`, bo, S[0].s));
+  assert.equal((await call(me, 'POST', '/api/people/book', { title: 'Again', members: [bo], start: S[0].s, end: S[0].e })).code, 409, 'both taken now');
+});
