@@ -1,7 +1,7 @@
 import { html, useState, S, api, post, patch, del, load, toast, openModal, confirmDialog, when, dh, DN, PRI, projectById, SH, n24, priColor, fromIso, isoDate, hm } from './lib.js';
 import { I } from './icons.js';
 import { moveDialog } from './now.js';
-import { PlaceInput, googleCals, SwitchN, hoursOpts, atTime } from './eventsheet.js';
+import { PlaceInput, googleCals, SwitchN, hoursOpts, atTime, Duration, hoursAt, lastUsed } from './eventsheet.js';
 let LOCS = null;
 
 const DURS = [15, 30, 45, 60, 90, 120, 180];
@@ -20,13 +20,13 @@ export async function openTask(idOrNew, opts = {}) {
 
 function Editor({ task, opts, close }) {
   const st = S.state, isNew = !task;
-  const defProject = opts.project_id || (st.projects.find(p => p.name === 'Inbox' && p.owner_id === st.me.id) || st.projects[0] || {}).id;
+  const defProject = opts.project_id || (st.projects.find(p => String(p.id) === lastUsed('project') && !p.archived) || st.projects.find(p => p.name === 'Inbox' && p.owner_id === st.me.id) || st.projects[0] || {}).id;
   // start and due: a day and, if given, a time (kept in meta.from / meta.due); a new task starts now
   const tOf = (d, ms) => d && +ms && isoDate(+ms) === d ? hm(+ms) : '';
-  const now5 = Math.ceil(Date.now() / 300000) * 300000;
+  const now5 = opts.at || Math.ceil(Date.now() / 300000) * 300000;   // from the calendar: the time clicked
   const [f, setF] = useState(() => task ? { ...task, recur: task.recur || null, st: tOf(task.start_after, task.meta?.from), dt: tOf(task.deadline, task.meta?.due), win: !!task.meta?.win } : {
     title: opts.title || '', project_id: defProject, duration: st.settings?.dFree || 60, priority: 2, deadline: '', start_after: isoDate(now5), st: hm(now5), dt: '', assignee_id: st.me.id, win: false,
-    auto: true, schedule: null, recur: null, points: [], notes: '', min_chunk: null, assign_mode: 'fixed', parent_id: opts.parent_id || null, col: opts.col || 0, location: '', meta: {} });
+    auto: true, schedule: (opts.at && hoursAt(opts.at)) || null, recur: null, points: [], notes: '', min_chunk: null, assign_mode: 'fixed', parent_id: opts.parent_id || null, col: opts.col || 0, location: '', meta: {} });
   const [busy, setBusy] = useState(false), [tried, setTried] = useState(false);
   const set = p => setF(x => ({ ...x, ...p }));
   const proj = projectById(+f.project_id), members = proj?.members || [];
@@ -47,6 +47,7 @@ function Editor({ task, opts, close }) {
           from: f.start_after && f.st ? atTime(f.start_after, f.st) : undefined, due: f.deadline && f.dt ? atTime(f.deadline, f.dt) : undefined, win: f.win ? f.meta?.win || null : undefined } };
       if (LOCS && f.location && !LOCS.includes(f.location)) LOCS.push(f.location);
       const res = isNew ? await post('/api/tasks', body) : await patch('/api/tasks/' + task.id, body);
+      if (isNew) lastUsed('project', f.project_id);
       await load(['tasks', 'plan']); close(res);
       if (isNew && res.sched?.first) toast(`Scheduled ${when(res.sched.first)}`);
     } catch (e) { toast(e.message); } finally { setBusy(false); }
@@ -68,9 +69,9 @@ function Editor({ task, opts, close }) {
       <div class="cell"><span>Project</span><select value=${f.project_id} onChange=${e => set({ project_id: +e.target.value, parent_id: null })}>${st.projects.filter(p => !p.archived).map(p => html`<option value=${p.id}>${p.name}</option>`)}</select></div>
       <div class="cell two"><div><span class="lbl">Start</span><div class="dt">${f.start_after ? html`<input type="date" value=${f.start_after} onInput=${e => set({ start_after: e.target.value })}/><div class="tm"><input class="t24" value=${f.st} placeholder="--:--" onChange=${e => set({ st: n24(e.target.value) || '' })}/></div>`
           : html`<button type="button" class="none" onClick=${() => set({ start_after: isoDate(Date.now()), st: hm(Math.ceil(Date.now() / 300000) * 300000) })}>Now</button>`}</div></div>
-        <div><span class="lbl">Due</span><div class="dt">${f.deadline ? html`<input type="date" value=${f.deadline} min=${f.start_after || ''} onInput=${e => set({ deadline: e.target.value })}/><div class="tm"><input class="t24" value=${f.dt} placeholder="--:--" onChange=${e => set({ dt: n24(e.target.value) || '' })}/><button type="button" class="icon" title="No due date" onClick=${() => set({ deadline: '', dt: '' })}>${I('x', 14)}</button></div>`
+        <div><span class="lbl">Due${f.deadline && html`<button type="button" class="icon" title="No due date" onClick=${() => set({ deadline: '', dt: '' })}>${I('x', 13)}</button>`}</span><div class="dt">${f.deadline ? html`<input type="date" value=${f.deadline} min=${f.start_after || ''} onInput=${e => set({ deadline: e.target.value })}/><div class="tm"><input class="t24" value=${f.dt} placeholder="--:--" onChange=${e => set({ dt: n24(e.target.value) || '' })}/></div>`
           : html`<button type="button" class="none" onClick=${() => set({ deadline: f.start_after || isoDate(Date.now()) })}>None</button>`}</div></div></div>
-      <div class="cell"><span>Takes</span><span class="stepper"><button type="button" class="mn" title="Less" onClick=${() => set({ duration: Math.max(5, +f.duration - (+f.duration > 15 ? 15 : 5)) })}></button><b>${dh(+f.duration)}</b><button type="button" class="pl" title="More" onClick=${() => set({ duration: Math.min(24 * 60, +f.duration + 15) })}></button></span></div>
+      <div class="cell"><span>Takes</span><${Duration} value=${+f.duration} set=${m => set({ duration: m })}/></div>
       <label class="cell"><span>Certain time window</span><input type="checkbox" checked=${f.win} onChange=${e => set({ win: e.target.checked, meta: { ...(f.meta || {}), win: e.target.checked ? f.meta?.win || { days: [1, 2, 3, 4, 5], s: '08:00', e: '11:00' } : null } })}/></label>
       ${f.win && f.meta?.win ? html`<div class="cell"><span>Between</span><span class="row" style="gap:6px;flex:none">${['s', 'e'].map((k, n) => html`${n ? '–' : ''}<input class="t24" value=${f.meta.win[k]} onChange=${e => set({ meta: { ...f.meta, win: { ...f.meta.win, [k]: n24(e.target.value) || f.meta.win[k] } } })}/>`)}</span></div>
         <div class="cell"><div class="seg days">${[1, 2, 3, 4, 5, 6, 0].map(d => html`<button type="button" class=${f.meta.win.days.includes(d) ? 'on' : ''} onClick=${() => set({ meta: { ...f.meta, win: { ...f.meta.win, days: f.meta.win.days.includes(d) ? f.meta.win.days.filter(x => x !== d) : [...f.meta.win.days, d] } } })}>${DN[d].slice(0, 2)}</button>`)}</div></div>`

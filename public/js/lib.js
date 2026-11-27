@@ -79,6 +79,18 @@ const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'
 export const SH = ms => { const d = new Date(ms); return `${d.getDate()} ${MN[d.getMonth()]}`; };
 export const dayLabel = ms => { const t = startOfDay(Date.now()), d = startOfDay(ms); return d === t ? 'today' : d === addDays(t, 1) ? 'tomorrow' : d === addDays(t, -1) ? 'yesterday' : `${DN[new Date(ms).getDay()]} ${SH(ms)}`; };
 export const when = ms => ms ? `${dayLabel(ms)} ${hm(ms)}` : '';
+// a duration typed freely, in minutes: "1:30", "1;30", "1.5", "1,5", "1h30", "1 h 30 min", "90", "90m", "2h", "2 Std" …
+// a plain number up to 9 is hours, from 10 on minutes; null if it can't be read
+export function parseDur(txt) {
+  const s = String(txt || '').trim().toLowerCase().replace(/\s+/g, ' '); if (!s) return null;
+  let m = s.match(/^(\d+)\s*[:;]\s*(\d{1,2})$/); if (m) return +m[1] * 60 + +m[2];
+  m = s.match(/^(?:(\d+(?:[.,]\d+)?)\s*(?:h|hr|hrs|hours?|std|stunden?)\.?)?\s*(?:(\d+)\s*(?:m|min|mins|minutes?|minuten?)?\.?)?$/);
+  if (m && m[1] && (m[2] || /[a-z]/.test(s))) return Math.round(parseFloat(m[1].replace(',', '.')) * 60) + (+m[2] || 0);
+  m = s.match(/^(\d+)\s*(?:m|min|mins|minutes?|minuten?)\.?$/); if (m) return +m[1];
+  m = s.match(/^(\d+)[.,](\d+)$/); if (m) return Math.round(parseFloat(m[1] + '.' + m[2]) * 60);
+  m = s.match(/^(\d+)$/); if (m) return +m[1] < 10 ? +m[1] * 60 : +m[1];
+  return null;
+}
 export const dh = m => { m = Math.round(m); return m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ' ' + (m % 60) : ''}` : `${m} min`; };
 export const clock = m => `${pad(Math.floor(m / 60))}:${pad(Math.floor(m % 60))}`;
 export const n24 = v => { v = String(v || '').trim().replace(/[.h]/, ':'); let h, m;

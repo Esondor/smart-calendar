@@ -1,6 +1,6 @@
 // The sheet of a calendar event (Calendar and Now): title, day, time, calendar; whether it blocks, travel time;
 // the times it may be moved to (an hours set, e.g. a doctor's opening hours) and buttons to move it to the next free time.
-import { html, useState, useEffect, useRef, S, api, patch, post, load, toast, openModal, confirmDialog, askMinutes, addDays, hm, DN, SH, dh, isoDate, fromIso, n24, priColor } from './lib.js';
+import { html, useState, useEffect, useRef, S, api, patch, post, load, toast, openModal, confirmDialog, askMinutes, addDays, hm, DN, SH, dh, isoDate, fromIso, n24, priColor, parseDur } from './lib.js';
 import { I } from './icons.js';
 
 export const googleCals = () => S.state.accounts.filter(a => a.kind === 'google' && a.status === 'ok').flatMap(a => a.calendars.filter(c => c.writable && c.id !== S.state.settings?.plan?.calendarId).map(c => ({ ...c, acc: a.id })));
@@ -182,6 +182,28 @@ export async function openEventSheet(ev) {
 // that is only where it starts: as the due date comes near it rises by itself.
 const PRIS = [[3, 'Low'], [2, 'Medium'], [1, 'High'], [0, 'ASAP']];
 // two choices: a switch that slides from the left one to the right one
+// how long: − / + in quarter hours, or tap the value and type it ("1:30", "1,5", "90", "1h30" …)
+export function Duration({ value, set, min = 5 }) {
+  const [ed, setEd] = useState(null), [bad, setBad] = useState(false);
+  const apply = (v = ed) => { const m = parseDur(v); if (m == null || m < min || m > 24 * 60) { setBad(true); return false; } set(m); setEd(null); setBad(false); return true; };
+  const step = k => set(Math.max(min, Math.min(24 * 60, k < 0 ? value - (value > 15 ? 15 : 5) : value + 15)));
+  return html`<span class="stepper"><button type="button" class="mn" title="Less" onClick=${() => step(-1)}></button>
+    ${ed == null ? html`<b class="durv" onClick=${() => setEd(dh(value).replace(' min', ''))}>${dh(value)}</b>`
+      : html`<input class=${'durin' + (bad ? ' bad' : '')} value=${ed} autofocus onInput=${e => { setEd(e.target.value); setBad(false); }} onBlur=${e => { if (!apply(e.target.value)) { setEd(null); setBad(false); } }}
+          onKeyDown=${e => { if (e.key === 'Enter') { e.preventDefault(); apply(e.target.value); } if (e.key === 'Escape') { e.stopPropagation(); setEd(null); setBad(false); } }} ref=${el => el && !el.dataset.f && (el.dataset.f = 1, el.focus(), el.select())}/>`}
+    <button type="button" class="pl" title="More" onClick=${() => step(1)}></button></span>`;
+}
+// likely values for something new: the hours a time falls in, and what you used last
+export function hoursAt(ms) {
+  const H = S.state.settings?.hours || {}, d = new Date(ms), wdk = d.getDay(), m = d.getHours() * 60 + d.getMinutes();
+  const mins = t => +t.slice(0, 2) * 60 + +t.slice(3);
+  // the hours it falls in; outside all of them, the ones nearest to it that day (an evening click: personal)
+  let best = null, gap = Infinity;
+  for (const n of Object.keys(H)) { const v = H[n]?.[wdk]; const L = !v ? [] : Array.isArray(v[0]) ? v : [v];
+    for (const [a, b] of L) { const g = m >= mins(a) && m < mins(b) ? 0 : Math.min(Math.abs(m - mins(a)), Math.abs(m - mins(b))); if (g < gap) { gap = g; best = n; } } }
+  return best;
+}
+export const lastUsed = (k, v) => { try { if (v === undefined) return localStorage.getItem('last-' + k); if (v != null && v !== '') localStorage.setItem('last-' + k, String(v)); } catch {} return null; };
 // several choices in one: the knob slides to the one picked
 export const SwitchN = ({ opts, value, set }) => { const i = Math.max(0, opts.findIndex(([v]) => v === value));
   return html`<div class="swn" style=${{ '--n': opts.length, '--i': i }}>${opts.map(([v, l], k) => html`<button type="button" class=${k === i ? 'on' : ''} onClick=${() => set(v)}>${l}</button>`)}</div>`; };
@@ -194,8 +216,8 @@ export async function newAppointment(at = null) {
   const t0 = at || Math.ceil(Date.now() / 300000) * 300000;
   const r = await openModal(close => { const B = () => {
     const [f, setF] = useState({ title: '', plan: !cals.length, sd: isoDate(t0), st: hm(t0), ed: isoDate(t0 + 3600e3), et: hm(t0 + 3600e3), dd: '', dt: '',
-      all_day: false, block: true, minutes: 30, when: names.includes('personal') ? 'personal' : names[0], win: false, days: [1, 2, 3, 4, 5], ws: '08:00', we: '11:00',
-      priority: 2, cal: cals.length ? String((cals.find(c => c.use_busy) || cals[0]).id) : '', location: '', travel: 0, notes: '' });
+      all_day: false, block: true, minutes: 30, when: (at && hoursAt(at)) || (names.includes('personal') ? 'personal' : names[0]), win: false, days: [1, 2, 3, 4, 5], ws: '08:00', we: '11:00',
+      priority: 2, cal: cals.length ? String((cals.find(c => String(c.id) === lastUsed('cal')) || cals.find(c => c.use_busy) || cals[0]).id) : '', location: '', travel: 0, notes: '' });
     const set = x => setF({ ...f, ...x }), plan = f.plan;
     // moving the start keeps the length; the end never before the start
     const setStart = x => { const n = { ...f, ...x }; if (!plan) { const len = atTime(f.ed, f.et || '00:00') - atTime(f.sd, f.st || '00:00'), e = atTime(n.sd, n.st || '00:00') + Math.max(len, 15 * 60000); n.ed = isoDate(e); n.et = hm(e); } setF(n); };
@@ -203,20 +225,19 @@ export async function newAppointment(at = null) {
     // what is still missing: shown in red once you press Add
     const miss = new Set([!f.title.trim() && 'title', plan && f.win && !f.days.length && 'days', plan && f.win && f.we <= f.ws && 'between', plan && e && e <= s && 'due',
       !plan && (f.all_day ? f.ed < f.sd : !(e > s)) && 'end'].filter(Boolean)), ok = !miss.size, bad = k => f.tried && miss.has(k) ? ' bad' : '';
-    const step = k => set({ minutes: Math.max(15, Math.min(12 * 60, f.minutes + k * 15)) });
     return html`<div class="modal sm appt"><input type="text" class=${'ttl' + bad('title')} placeholder="Title" value=${f.title} onInput=${x => set({ title: x.target.value })}/>
       ${cals.length > 0 && html`<div style="margin-top:12px"><${Switch2} a="Time" b="Planned" right=${plan} set=${v => set({ plan: v })}/></div>`}
       <div class="box" style="margin-top:12px">
         <div class=${'cell two' + bad('due') + bad('end')}><div><span class="lbl">Start</span><${DateTime} d=${f.sd} t=${f.st} empty=${!plan && f.all_day} setD=${v => setStart({ sd: v })} setT=${v => setStart({ st: v || f.st })}/></div>
-          <div><span class="lbl">${plan ? 'Due' : 'End'}</span>${plan
-            ? html`<div class="dt">${f.dd ? html`<input type="date" value=${f.dd} min=${f.sd} onInput=${x => set({ dd: x.target.value })}/><div class="tm"><input class="t24" value=${f.dt} placeholder="--:--" onChange=${x => set({ dt: n24(x.target.value) || '' })}/><button type="button" class="icon" title="No due date" onClick=${() => set({ dd: '', dt: '' })}>${I('x', 14)}</button></div>`
+          <div><span class="lbl">${plan ? 'Due' : 'End'}${plan && f.dd && html`<button type="button" class="icon" title="No due date" onClick=${() => set({ dd: '', dt: '' })}>${I('x', 13)}</button>`}</span>${plan
+            ? html`<div class="dt">${f.dd ? html`<input type="date" value=${f.dd} min=${f.sd} onInput=${x => set({ dd: x.target.value })}/><div class="tm"><input class="t24" value=${f.dt} placeholder="--:--" onChange=${x => set({ dt: n24(x.target.value) || '' })}/></div>`
               : html`<button type="button" class="none" onClick=${() => set({ dd: f.sd })}>None</button>`}</div>`
             : html`<${DateTime} d=${f.ed} t=${f.et} empty=${f.all_day} setD=${v => set({ ed: v })} setT=${v => set({ et: v || f.et })}/>`}</div></div>
         ${!plan ? html`
           <label class="cell"><span>All day</span><input type="checkbox" checked=${f.all_day} onChange=${x => set({ all_day: x.target.checked, block: !x.target.checked, ed: x.target.checked ? f.sd : f.ed })}/></label>
           <label class="cell"><span>Blocks time</span><input type="checkbox" checked=${f.block} onChange=${x => set({ block: x.target.checked })}/></label>`
         : html`
-          <div class="cell"><span>Takes</span><span class="stepper"><button type="button" class="mn" title="Less" onClick=${() => step(-1)}></button><b>${dh(f.minutes)}</b><button type="button" class="pl" title="More" onClick=${() => step(1)}></button></span></div>
+          <div class="cell"><span>Takes</span><${Duration} value=${f.minutes} set=${m => set({ minutes: m })}/></div>
           <label class="cell"><span>Certain time window</span><input type="checkbox" checked=${f.win} onChange=${x => set({ win: x.target.checked })}/></label>
           ${f.win ? html`<div class=${'cell' + bad('between')}><span>Between</span><span class="row" style="gap:6px;flex:none"><input class="t24" value=${f.ws} onChange=${x => set({ ws: n24(x.target.value) || f.ws })}/>–<input class="t24" value=${f.we} onChange=${x => set({ we: n24(x.target.value) || f.we })}/></span></div>
             <div class=${'cell' + bad('days')}><div class="seg days">${WD.map(([d, l]) => html`<button type="button" class=${f.days.includes(d) ? 'on' : ''} onClick=${() => set({ days: f.days.includes(d) ? f.days.filter(x => x !== d) : [...f.days, d] })}>${l}</button>`)}</div></div>`
@@ -229,6 +250,7 @@ export async function newAppointment(at = null) {
       </div>
       <div class="acts"><button onClick=${() => close(null)}>Cancel</button><button class=${'pri' + (ok ? '' : ' off')} onClick=${() => ok ? close({ ...f, s, e }) : set({ tried: true })}>Add</button></div></div>`; }; return html`<${B}/>`; });
   if (!r) return;
+  lastUsed('cal', r.cal);
   try {
     if (!r.plan) {
       await post('/api/events', { calendar_id: +r.cal, title: r.title.trim(), all_day: r.all_day, start: r.all_day ? fromIso(r.sd) : r.s, end: r.all_day ? addDays(fromIso(r.ed), 1) : r.e,

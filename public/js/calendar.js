@@ -29,7 +29,7 @@ export async function newMenu({ at = null, project_id } = {}) {
     <button onClick=${() => close('appt')}>${I('calendar')}Appointment</button>
     <button onClick=${() => close('break')}>${I('cup')}Break / Block Time</button></div>
     <div class="acts"><button onClick=${() => close(null)}>Cancel</button></div></div>`);
-  if (v === 'task') { const t = await openTask('new', project_id ? { project_id } : {}); if (at && t?.id) { await post(`/api/tasks/${t.id}/pin`, { period: t.period || 0, s: at, e: at + (t.duration || 30) * 60000 }); load(['plan']); } }
+  if (v === 'task') { const t = await openTask('new', { ...(project_id ? { project_id } : {}), ...(at ? { at } : {}) }); if (at && t?.id) { await post(`/api/tasks/${t.id}/pin`, { period: t.period || 0, s: at, e: at + (t.duration || 30) * 60000 }); load(['plan']); } }
   if (v === 'appt') newAppointment(at);
   if (v === 'break') blockTime(at);
 }
