@@ -1070,3 +1070,5 @@ aside.files .fhead b{white-space:nowrap}
 .ev.fixed.sel .rs::after,.ev.appt.sel .rs::after,.ev.past.sel .rs::after{content:"";position:absolute;left:50%;bottom:4px;width:26px;height:4px;margin-left:-13px;border-radius:2px;background:var(--ink);opacity:.6}
 .ev.fixed.sel .rs-top::after,.ev.appt.sel .rs-top::after,.ev.past.sel .rs-top::after{bottom:auto;top:4px}
 .ev.fixed.drag,.ev.appt.drag,.ev.past.drag{opacity:.9;z-index:5}
+/* with a mouse: what you can drag shows it */
+@media (pointer:fine){.ev.block,.ev.busy:has(.rs),.ev.fixed.rm,.ev.past[data-k]{cursor:grab}.ev.drag{cursor:grabbing}}

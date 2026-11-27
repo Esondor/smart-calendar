@@ -273,10 +273,13 @@ export default function CalendarView() {
   const onDown = (e, it) => {
     if (drag.current) return;
     const el = e.currentTarget;
-    if (who !== st.me.id || sel !== selKey(it)) drag.current = { it, tap: true, x0: e.clientX, y0: e.clientY };
+    // with a mouse, anything you can change is dragged (or resized at its edges) right away and a click selects it;
+    // by touch, the first tap selects it and only then can it be dragged, so scrolling never moves anything by mistake
+    const can = who === st.me.id && !(it.kind === 'event' && !it.ev.editable), direct = can && e.pointerType === 'mouse';
+    if (!direct && (who !== st.me.id || sel !== selKey(it))) drag.current = { it, tap: true, x0: e.clientX, y0: e.clientY };
     else {
       const h = e.target.closest('.rs'), mode = !h ? 'move' : h.classList.contains('rs-top') ? 'start' : 'end';
-      drag.current = { it, el, k: selKey(it), x0: e.clientX, y0: e.clientY, cw: el.parentElement.getBoundingClientRect().width, moved: false, dm: 0, dd: 0, mode, h0: el.offsetHeight };
+      drag.current = { it, el, k: selKey(it), x0: e.clientX, y0: e.clientY, cw: el.parentElement.getBoundingClientRect().width, moved: false, dm: 0, dd: 0, mode, h0: el.offsetHeight, was: sel === selKey(it) };
       try { el.setPointerCapture(e.pointerId); } catch {}
     }
     listen(true);
@@ -320,6 +323,7 @@ export default function CalendarView() {
     const isEv = g.it.kind === 'event', isBusy = g.it.kind === 'busy', isLog = g.it.kind === 'log';
     if (g.tap) return who !== st.me.id ? (isEv || isBusy || isLog ? null : openTask(g.it.u.taskId)) : isEv && !g.it.ev.editable ? eventSheet(g.it.ev) : setSel(selKey(g.it));
     const el = elOf(g);
+    if (!g.moved && !g.was) { unpaint(el); return setSel(selKey(g.it)); }   // a mouse click on something not selected: select it
     if (!g.moved) { unpaint(el); setSel(null); return isEv ? eventSheet(g.it.ev) : isBusy ? busySheet(g.it.bu) : isLog ? openTask(g.it.task) : blockSheet(g.it); }
     const k = g.mode === 'move' ? g.dm * 60000 + g.dd * 864e5 : g.dm * 60000;
     if (!k) return unpaint(el);
