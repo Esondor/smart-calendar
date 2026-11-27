@@ -266,6 +266,7 @@ By default the bar shows what Now shows: appointments that block time, without h
 The quick menu has these buttons:
 - **Tasks:** Start, Pause, Done, 30 More Minutes, Postpone, Skip.
 - **Track an appointment:** an appointment you're in (blocked time too) has *Start*, *Pause* and *Done* in Now and in its details, like in the menu bar. Tracked past its end, it keeps its time and gets 30 more minutes each time, until you press Done.
+- **Google matches Smart Calendar:** what you drag, start, pause or extend here shows the same in Google at once, also a tracked appointment's longer end. Whatever you worked on stays in both as the log, marked ✓ and cut to when you worked. A block that came and went without being started is just planned again; nothing is logged.
 - **Pause:** what you did so far is logged right away and the task stays in Now as *Paused*. Resume within 10 minutes and it carries on as one session; after that, the part before stays as its own entry and Resume starts a new one. *Stop* lets the paused task go.
 - **Start from the planned time:** forgot to press Start? *Start from 14:00* counts from when the block was planned. The block runs to its planned end plus 30 minutes and gets 30 more each time that's reached, until you press Done.
 - **Free time:** Break, Lunch.

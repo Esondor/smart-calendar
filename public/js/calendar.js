@@ -334,7 +334,7 @@ export default function CalendarView() {
         const style = { top: top(x.s) + 'px', height: Math.max(14, (x.e - x.s) / 3600e3 * hh - 2) + 'px' };
         if (x.lanes > 1) { style.left = `calc(${100 * x.lane / x.lanes}% + 2px)`; style.width = `calc(${100 / x.lanes}% - 4px)`; style.right = 'auto'; }
         if (x.kind === 'past') return html`<div class=${'ev past' + (x.done ? ' dn' : '')} style=${{ ...style, '--c': x.c || 'var(--done)' }} title=${`${x.t}${x.p ? '\n' + x.p : ''}\n${x.tick ? 'Done ' + hm(x.e1) : hm(x.s1) + '–' + hm(x.e1)}`} onClick=${x.task ? () => openTask(x.task) : null}>
-          <span class="et">${x.done ? html`<span class="kind">${I('check', 12)}</span>` : ''}${x.research ? 'Research · ' : ''}${x.t}</span><span class="em">${x.tick ? 'Done ' + hm(x.e1) : `${hm(x.s1)}–${hm(x.e1)}`}${n === 1 && x.p ? ' · ' + x.p : ''}</span></div>`;
+          <span class="et"><span class="kind">${I('check', 12)}</span>${x.research ? 'Research · ' : ''}${x.t}</span><span class="em">${x.tick ? 'Done ' + hm(x.e1) : `${hm(x.s1)}–${hm(x.e1)}`}${n === 1 && x.p ? ' · ' + x.p : ''}</span></div>`;
         if (x.kind === 'block') { const cur = plan.active && plan.active.task_id === x.u.taskId, fit = Math.floor(((x.e - x.s) / 3600e3 * hh - 44) / 16), pts = n === 1 && fit > 0 ? partPoints(x.u.points, x.b.part, x.b.parts).slice(0, fit) : [];   // only as many points as fit
           return html`<div class=${'ev block' + (x.b.pinned ? ' pinned' : '') + (x.u.late ? ' late' : '') + (cur ? ' cur' : '') + (sel === selKey(x) ? ' sel' : '')} style=${{ ...style, background: x.u.p_color }}
             data-k=${selKey(x)} onPointerDown=${e => onDown(e, x)} title=${`${x.u.title}\n${x.u.p_name}${x.u.late ? '\nAfter deadline' : ''}`}>
@@ -348,7 +348,7 @@ export default function CalendarView() {
             ${(() => { const it = { kind: 'event', ev, s: ev.start, e: ev.end, b: { key: 'e' + ev.id, s: ev.start } };
               return html`<div class=${'ev busy' + (x.free ? ' free' : '') + (ev.before || ev.after ? ' hasb' : '') + (sel === selKey(it) ? ' sel' : '')} style=${{ ...part(x.s0, x.e0), ...bc, ...(x.color && !x.free ? { borderLeft: `3px solid ${x.color}` } : {}) }} title=${`${x.t}\n${x.cal}`}
                 data-k=${selKey(it)} onPointerDown=${e => onDown(e, it)}>
-                <span class="et"><span class="kind">${I('pin', 12)}</span>${x.t}<${AlsoDots} ev=${ev}/></span><span class="em">${hm(ev.start)}–${hm(ev.end)} · ${x.cal}</span>${ev.editable && html`<div class="rs rs-top"></div><div class="rs"></div>`}</div>`; })()}
+                <span class="et"><span class="kind">${I(ev.done ? 'check' : 'pin', 12)}</span>${x.t}<${AlsoDots} ev=${ev}/></span><span class="em">${hm(ev.start)}–${hm(ev.end)} · ${x.cal}</span>${ev.editable && html`<div class="rs rs-top"></div><div class="rs"></div>`}</div>`; })()}
             ${x.e > x.e0 && html`<div class="ev buf a" style=${{ ...part(x.e0, x.e), ...bc }} onClick=${open} title=${ev.travel?.home ? `Home: ${dh(ev.travel.min)} by ${ev.travel.mode}` : dh(ev.after) + ' after'}>${(x.e - x.e0) / 3600e3 * hh > 14 ? html`${ev.travel?.home ? html`<span class="way">${I(ev.travel.mode, 11)}</span>` : ''}${dh(ev.after)}` : ''}</div>`}`;
         }
         return html`<div class=${'ev ' + x.kind} style=${style} title=${x.t}

@@ -366,9 +366,81 @@ test('a block that passed without work goes away; worked on or done from it stay
   run("INSERT INTO work_log(user_id, task_id, kind, start, end) VALUES (?, ?, 'work', ?, ?)", uid, b, t0 - 85 * 60000, t0 - 65 * 60000);
   run(`UPDATE tasks SET status = 'done', done_at = ? WHERE id = ?`, t0 - 30 * 60000, c);
   await google.pushPlan(uid, () => planUser(uid));
-  assert.ok(!store.has(ea.id) || store.get(ea.id).status === 'cancelled', 'not worked on: removed');
+  const sa = store.get(ea.id);
+  assert.ok(!sa || sa.status === 'cancelled' || Date.parse(sa.start.dateTime) >= t0 - 60000, 'not worked on: planned again, nothing left at the old time');
+  assert.ok(![...store.values()].some(e => /Skipped/.test(e.summary || '') && e.status !== 'cancelled' && Date.parse(e.start.dateTime) < t0 - 60000), 'nothing logged');
   assert.ok(store.has(eb.id) && store.get(eb.id).status !== 'cancelled', 'worked on: kept');
+  assert.equal(store.get(eb.id).summary, '✓ Worked thing', 'logged with ✓');
+  assert.equal(Date.parse(store.get(eb.id).start.dateTime), t0 - 85 * 60000, 'as it was worked');
+  assert.equal(Date.parse(store.get(eb.id).end.dateTime), t0 - 65 * 60000);
   assert.equal(store.get(ec.id)?.summary, '✓ Ticked thing', 'done: kept, ticked');
   for (const id of [a, b, c]) run('DELETE FROM tasks WHERE id = ?', id);
   const s2 = settingsOf(uid); s2.plan = keep; saveSettings(uid, s2);
+});
+
+test('Google shows what Smart Calendar shows: a dragged block, the session that runs from its start, paused as ✓, resumed as one', async () => {
+  const A = await import('../server/actions.js');
+  const t0 = Date.now(), tomorrow = new Date(t0 + 864e5).toISOString().slice(0, 10);
+  const id = Number(run(`INSERT INTO tasks(project_id, title, duration, created_by, assignee_id, created_at, updated_at, start_after) VALUES (?, 'Drag me', 30, ?, ?, ?, ?, ?)`, pid, uid, uid, t0, t0, tomorrow).lastInsertRowid);
+  await google.pushPlan(uid, () => planUser(uid));
+  const ev = [...store.values()].find(e => e.summary === 'Drag me'); assert.ok(ev);
+  const s0 = Date.parse(ev.start.dateTime), s1 = s0 + 3 * 3600e3;
+  A.pinBlock(uid, id, 0, s0, s1, s1 + 45 * 60000);
+  await google.pushPlan(uid, () => planUser(uid));
+  assert.equal(Date.parse(store.get(ev.id).start.dateTime), s1, 'dragged: moved in Google');
+  assert.equal(Date.parse(store.get(ev.id).end.dateTime), s1 + 45 * 60000);
+  // started from 20 min ago: Google shows it from then
+  A.startTimer(uid, id, 0, null, null, { since: t0 - 20 * 60000, until: t0 + 40 * 60000 });
+  await google.pushPlan(uid, () => planUser(uid));
+  const runs = () => [...store.values()].filter(e => /Drag me/.test(e.summary || '') && Date.parse(e.start.dateTime) <= Date.now());
+  assert.equal(runs().length, 1); assert.equal(Date.parse(runs()[0].start.dateTime), t0 - 20 * 60000, 'from its start');
+  const rid = runs()[0].id;
+  // paused: what was worked stays as the log, with ✓
+  A.pauseTimer(uid);
+  await google.pushPlan(uid, () => planUser(uid));
+  assert.equal(store.get(rid).summary, '✓ Drag me');
+  assert.ok(Math.abs(Date.parse(store.get(rid).end.dateTime) - Date.now()) < 120000, 'ends where it was paused');
+  // resumed at once: the same entry goes on, no second one
+  A.startTimer(uid, id, 0);
+  await google.pushPlan(uid, () => planUser(uid));
+  assert.equal(runs().length, 1); assert.equal(runs()[0].id, rid); assert.equal(store.get(rid).summary, 'Drag me');
+  A.stopTimer(uid, { done: true });
+  run('DELETE FROM tasks WHERE id = ?', id);
+});
+
+test('a block that began but was not started moves with the plan in Google (nothing kept at its old start)', async () => {
+  const t0 = Date.now();
+  const id = Number(run(`INSERT INTO tasks(project_id, title, duration, created_by, assignee_id, created_at, updated_at) VALUES (?, 'Not started', 60, ?, ?, ?, ?)`, pid, uid, uid, t0, t0).lastInsertRowid);
+  await google.pushPlan(uid, () => planUser(uid));
+  const ev = [...store.values()].find(e => e.summary === 'Not started'); assert.ok(ev);
+  run('UPDATE plan_events SET start = ?, end = ? WHERE ext_id = ?', t0 - 20 * 60000, t0 + 40 * 60000, ev.id);   // it began 20 min ago
+  const b = planUser(uid).blocks.find(x => x.key === String(id));
+  await google.pushPlan(uid, () => planUser(uid));
+  const all = [...store.values()].filter(e => e.summary === 'Not started' || e.summary === '✓ Not started');
+  assert.ok(all.every(e => !e.summary.startsWith('✓')), 'nothing logged');
+  assert.ok(all.some(e => Date.parse(e.start.dateTime) === b.s), 'where the plan has it');
+  assert.ok(!all.some(e => Date.parse(e.start.dateTime) < t0 - 60000), 'not at its old start');
+  run('DELETE FROM tasks WHERE id = ?', id);
+  await google.pushPlan(uid, () => planUser(uid));
+});
+
+test('a tracked appointment past its end: 30 min more in Google too; paused, it ends there', async () => {
+  const A = await import('../server/actions.js');
+  const { trackedEnds } = await import('../server/eventdone.js');
+  const work = get(`SELECT * FROM calendars WHERE ext_id = 'work@x'`), t0 = Date.now();
+  const end0 = t0 + 30000;
+  store.set('appt1', { id: 'appt1', cal: 'work@x', summary: 'Long one', status: 'confirmed', start: { dateTime: new Date(t0 - 50 * 60000).toISOString() }, end: { dateTime: new Date(end0).toISOString() } });
+  await google.syncEvents(get('SELECT * FROM accounts WHERE id = ?', work.account_id), work, t0 - 864e5, t0 + 864e5);
+  const e = get(`SELECT * FROM events WHERE ext_id = 'appt1'`);
+  A.startEvent(uid, e);
+  await trackedEnds(uid);
+  assert.equal(Date.parse(store.get('appt1').end.dateTime), end0 + 30 * 60000, '30 min more');
+  assert.equal(get(`SELECT end FROM events WHERE ext_id = 'appt1'`).end, end0 + 30 * 60000, 'and in the app');
+  await trackedEnds(uid);
+  assert.equal(Date.parse(store.get('appt1').end.dateTime), end0 + 30 * 60000, 'once, not every minute');
+  A.pauseEvent(uid);
+  await trackedEnds(uid);
+  const back = Math.max(end0, Math.ceil(Date.now() / 60000) * 60000);
+  assert.ok(Math.abs(Date.parse(store.get('appt1').end.dateTime) - back) <= 60000, 'paused: ends at its end, or now');
+  store.delete('appt1'); run(`DELETE FROM events WHERE ext_id = 'appt1'`); run('DELETE FROM event_track WHERE user_id = ?', uid);
 });

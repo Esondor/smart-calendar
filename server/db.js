@@ -387,6 +387,10 @@ const MIGRATIONS = [
     since INTEGER NOT NULL, at INTEGER NOT NULL, until INTEGER, note TEXT,
     log_id INTEGER, cal INTEGER NOT NULL DEFAULT 1   -- cal: the session still has to go into the log calendar (once it is split)
   );`,
+  `
+  ALTER TABLE plan_events ADD COLUMN kept INTEGER NOT NULL DEFAULT 0;   -- a block that was worked on: stays in the calendar as the log (✓), cut to what was worked
+  ALTER TABLE event_track ADD COLUMN orig_end INTEGER;                   -- the appointment's end before it was tracked past it (Google shows the longer end)
+  `,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

@@ -13,7 +13,7 @@ import { taskById, membersOf, projectIdsFor, projectPlaces, isMember, DEFAULT_PL
 import * as A from './actions.js';
 import { notify } from './notify.js';
 import { bus, notifyUsers } from './bus.js';
-import { finishEvent, startEvent } from './eventdone.js';
+import { finishEvent, startEvent, trackedEnds } from './eventdone.js';
 import * as google from './sync/google.js';
 import { defaultProject, createFlexible, eventToTask } from './flex.js';
 import { isoDate, dayStart, addDays } from './time.js';
@@ -178,7 +178,7 @@ export default async function extRoutes(app) {
   app.post('/api/ext/break', async req => { const { u } = tokenFrom(req, 'api'); A.breakNow(u.id, Math.max(5, Math.min(120, +req.body?.minutes || 15)), req.body?.title === 'Lunch' ? 'Lunch' : 'Break'); return { ok: true }; });
   // appointments: start, pause, done (eventdone.js: the real end, earlier or later than planned, and a new plan from there)
   app.post('/api/ext/events/:id/start', async req => { const { u } = tokenFrom(req, 'api'); return startEvent(u.id, ownEvent(u, +req.params.id)); });
-  app.post('/api/ext/events/:id/pause', async req => { const { u } = tokenFrom(req, 'api'); ownEvent(u, +req.params.id); A.pauseEvent(u.id); return { ok: true }; });
+  app.post('/api/ext/events/:id/pause', async req => { const { u } = tokenFrom(req, 'api'); ownEvent(u, +req.params.id); A.pauseEvent(u.id); await trackedEnds(u.id).catch(() => {}); return { ok: true }; });
   app.post('/api/ext/events/:id/done', async req => { const { u } = tokenFrom(req, 'api'); return finishEvent(u.id, ownEvent(u, +req.params.id), req.body?.end); });
   // + in the menu bar: a task, a fixed appointment, a flexible appointment
   app.post('/api/ext/tasks', async req => {

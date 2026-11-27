@@ -185,7 +185,7 @@ async function flexToTasks(acc, cal, items, known) {
 // ---------- what did you change in the calendar? ----------
 async function detectPlanChanges(acc, cal, items, from, to) {
   const byId = new Map(items.filter(e => e.status !== 'cancelled').map(e => [e.id, e]));
-  const rows = all('SELECT * FROM plan_events WHERE calendar_id = ? AND end > ? AND start < ?', cal.id, from, to);
+  const rows = all('SELECT * FROM plan_events WHERE calendar_id = ? AND kept = 0 AND end > ? AND start < ?', cal.id, from, to);
   const changes = [];
   for (const r of rows) {
     let e = byId.get(r.ext_id);
@@ -266,24 +266,30 @@ async function pushPlanNow(uid, plan) {
 
 async function reconcile(uid, cal, desired, plan, now, endMs) {
   const acc = get('SELECT * FROM accounts WHERE id = ?', cal.account_id);
-  const existing = all('SELECT * FROM plan_events WHERE calendar_id = ? ORDER BY start', cal.id).filter(x => x.end > now - 7 * 864e5);
+  run('DELETE FROM plan_events WHERE calendar_id = ? AND kept = 1 AND end < ?', cal.id, now - 30 * 864e5);
+  const existing = all('SELECT * FROM plan_events WHERE calendar_id = ? AND kept = 0 ORDER BY start', cal.id).filter(x => x.end > now - 7 * 864e5);
+  const kept = all('SELECT * FROM plan_events WHERE calendar_id = ? AND kept = 1 AND end > ?', cal.id, now - 864e5);
+  const act = get('SELECT task_id, period, since FROM active WHERE user_id = ?', uid);
+  // what was worked in a block until now: the timer sessions in it
+  const worked = (x, until) => { const w = get('SELECT MIN(start) s, MAX(end) e FROM work_log WHERE user_id = ? AND task_id = ? AND end > ? AND start < ?', uid, x.task_id, x.start, until); return w?.e ? w : null; };
   const used = new Set(), keep = [], create = [], patch = [];
   for (const d of desired) {
     const { taskId, period } = parseKey(d.key);
+    const running = !!act && act.task_id === taskId && (act.period || 0) === period && d.s <= now;
     const mine = existing.filter(x => !used.has(x.id) && x.task_id === taskId && x.period === period);
+    // the same block (close in time); the session that runs now: the block it began in, or the part logged before a short pause
     let m = mine.find(x => Math.abs(x.start - d.s) <= TOL && Math.abs(x.end - d.e) <= TOL)
-      || mine.find(x => x.start <= now && x.end > now && d.s <= x.end + TOL);           // block already running: keep its start
-    if (m) {
-      used.add(m.id); const ne = m.start <= now ? d.e : m.end;
-      if (Math.abs(ne - m.end) > TOL) { patch.push({ m, d: { ...d, s: m.start, e: ne } }); continue; }
-      // same time: rewrite only if the title, notes or busy/free changed (older rows without a fingerprint: by title)
-      const sig = contentSig(eventBody(uid, d, plan.units[d.key], cal));
-      if (m.sig ? m.sig !== sig : m.title !== eventBody(uid, d, plan.units[d.key], cal).summary) patch.push({ m, d: { ...d, s: m.start, e: m.end } });
-      else { if (!m.sig) run('UPDATE plan_events SET sig = ? WHERE id = ?', sig, m.id); keep.push(m); }
-      continue;
-    }
-    m = mine.find(x => x.start > now);
-    if (m) { used.add(m.id); patch.push({ m, d }); } else create.push(d);
+      || (running && mine.find(x => x.start <= now && x.end > now - TOL && d.s <= x.end + TOL));
+    if (!m && running) { m = kept.find(x => !used.has(x.id) && x.task_id === taskId && x.period === period && Math.abs(x.start - d.s) <= 60000); if (m) run('UPDATE plan_events SET kept = 0 WHERE id = ?', m.id); }
+    // else one that is still to come, or one that began but was not worked on (it moves with the plan, nothing is logged)
+    if (!m) { m = mine.find(x => x.start > now) || mine.find(x => x.start <= now && !worked(x, now)); if (m) { used.add(m.id); patch.push({ m, d }); } else create.push(d); continue; }
+    used.add(m.id);
+    // Google shows the block where Smart Calendar has it
+    if (Math.abs(d.s - m.start) > 60000 || Math.abs(d.e - m.end) > 60000) { patch.push({ m, d }); continue; }
+    // same time: rewrite only if the title, notes or busy/free changed (older rows without a fingerprint: by title)
+    const body = eventBody(uid, d, plan.units[d.key], cal), sig = contentSig(body);
+    if (m.sig ? m.sig !== sig : m.title !== body.summary) patch.push({ m, d: { ...d, s: m.start, e: m.end } });
+    else { if (!m.sig) run('UPDATE plan_events SET sig = ? WHERE id = ?', sig, m.id); keep.push(m); }
   }
   const left = existing.filter(x => !used.has(x.id));
   let nc = 0, np = 0, nd = 0, err = '';
@@ -305,21 +311,22 @@ async function reconcile(uid, cal, desired, plan, now, endMs) {
         continue;
       }
       if (x.start < now) {
-        // past or running: stays in the calendar only if it was worked on (a timer session in it, the timer running now)
-        // or the task was done from it on; a block that just passed by, was moved or planned again goes away
-        const until = Math.min(x.end, now);
-        const tracked = !!get('SELECT 1 FROM work_log WHERE user_id = ? AND task_id = ? AND end > ? AND start < ?', uid, x.task_id, x.start, until)
-          || (x.end > now && !!get('SELECT 1 FROM active WHERE user_id = ? AND task_id = ?', uid, x.task_id));
+        // past or running: stays in the calendar only if it was worked on (a timer session in it) or the task was done
+        // from it on: then as the log, "✓ …", cut to what was worked. One that just passed by, was moved or planned
+        // again goes away (nothing is logged)
+        const until = Math.min(x.end, now), w = worked(x, until);
         const doneHere = done && (t.recur || (t.done_at || 0) >= x.start - TOL);
-        if (!tracked && !doneHere) {
+        if (!w && !doneHere) {
           await api(acc, 'DELETE', path).catch(e => { if (e.status !== 404 && e.status !== 410) throw e; });
           run('DELETE FROM plan_events WHERE id = ?', x.id); nd++; continue;
         }
-        const body = {};
-        if (done && !DONE_RE.test(x.title) && !/^[\p{L}\p{N}_-]{1,12} - [✓✔]/u.test(x.title)) body.summary = doneTagged(x.title);
-        if (x.end > now) { body.end = { dateTime: new Date(Math.ceil(now / 60000) * 60000).toISOString() }; }
-        if (Object.keys(body).length) await api(acc, 'PATCH', path, body).catch(e => { if (e.status !== 404 && e.status !== 410) throw e; });
-        run('DELETE FROM plan_events WHERE id = ?', x.id);
+        const s = w ? Math.max(x.start, w.s) : x.start, e = w ? Math.min(x.end, w.e) : Math.min(x.end, Math.ceil(now / 60000) * 60000);
+        const title = DONE_RE.test(x.title) || /^[\p{L}\p{N}_-]{1,12} - [✓✔]/u.test(x.title) ? x.title : doneTagged(x.title), body = {};
+        if (title !== x.title) body.summary = title;
+        if (Math.abs(s - x.start) > 30000) body.start = { dateTime: new Date(s).toISOString() };
+        if (Math.abs(e - x.end) > 30000) body.end = { dateTime: new Date(e).toISOString() };
+        if (Object.keys(body).length) { await api(acc, 'PATCH', path, body).catch(e => { if (e.status !== 404 && e.status !== 410) throw e; }); np++; }
+        run('UPDATE plan_events SET kept = 1, start = ?, end = ?, title = ? WHERE id = ?', s, e, title, x.id);
       } else {
         await api(acc, 'DELETE', path).catch(e => { if (e.status !== 404 && e.status !== 410) throw e; });
         run('DELETE FROM plan_events WHERE id = ?', x.id); nd++;

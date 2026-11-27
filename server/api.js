@@ -15,7 +15,7 @@ import { normalizeUrl } from './sync/ics.js';
 import { vikunjaUser, docFiles, attachment, forgetFiles, uploadFile } from './sync/vikunja.js';
 import { syncAccount } from './sync/loop.js';
 import { vapidPublicKey, sendPush } from './push.js';
-import { finishEvent, startEvent } from './eventdone.js';
+import { finishEvent, startEvent, trackedEnds } from './eventdone.js';
 import { listClashes, decideClash, dismissClash, undismissClash, hiddenEvents, userTag } from './conflicts.js';
 import { mailReady, sendMail } from './mail.js';
 import { notify, NOTIFY_TYPES } from './notify.js';
@@ -444,7 +444,7 @@ export default async function apiRoutes(app) {
   app.post('/api/events/:id/done', async req => finishEvent(req.user.id, ownEvent(req.user.id, req.params.id), req.body?.end));
   // track an appointment (e.g. blocked time that takes longer): Start, Pause; a task timer pauses it and the other way round
   app.post('/api/events/:id/start', async req => { const r = await startEvent(req.user.id, ownEvent(req.user.id, req.params.id)); markDirty(req.user.id, true); return r; });
-  app.post('/api/events/:id/pause', async req => { ownEvent(req.user.id, req.params.id); A.pauseEvent(req.user.id); markDirty(req.user.id, true); return { ok: true }; });
+  app.post('/api/events/:id/pause', async req => { ownEvent(req.user.id, req.params.id); A.pauseEvent(req.user.id); await trackedEnds(req.user.id).catch(() => {}); markDirty(req.user.id, true); return { ok: true }; });
   app.post('/api/events/:id/show', async req => { const e = ownEvent(req.user.id, req.params.id); undismissClash(req.user.id, e.calendar_id, e.ext_id); return { ok: true }; });
   app.put('/api/events/:id/buffer', async req => {
     const e = get('SELECT e.*, c.user_id FROM events e JOIN calendars c ON c.id = e.calendar_id WHERE e.id = ?', +req.params.id);
