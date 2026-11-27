@@ -11,12 +11,16 @@ const MISSED = new Map();         // uid -> { key, s, e }: the block that should
 const STEP = 30 * 60000;
 // a session started from the planned time runs to `until`, then 30 min more each time that is reached
 export const openEnd = (until, now = Date.now()) => until > now ? until : until + Math.ceil((now - until + 1) / STEP) * STEP;
-// the planned start of the block you missed: not before today, not before your last tracked session
-export function missedStart(uid, now = Date.now()) {
-  const m = MISSED.get(uid); if (!m || m.s > now - 60000) return null;
+// the block due now as first planned (also when the plan was not redone since it began), started from: not before today,
+// not before your last tracked session. Late: started more than a minute ago and nobody pressed Start.
+export function missedStart(uid, now = Date.now(), { late = true } = {}) {
+  if (get('SELECT 1 FROM active WHERE user_id = ?', uid)) return null;
+  let m = MISSED.get(uid);
+  if (!m || m.e <= m.s) { const b = (PLANS.get(uid)?.blocks || []).filter(x => x.s <= now && x.e > now).sort((x, y) => x.s - y.s)[0]; m = b && { key: b.key, s: b.s, e: b.e }; }
+  if (!m) return null;
   const last = get('SELECT MAX(end) e FROM work_log WHERE user_id = ? AND end <= ?', uid, now)?.e || 0;
   const s = Math.max(m.s, last, dayStart(isoDate(now)));
-  return s < now - 60000 ? { key: m.key, s, e: m.e } : null;
+  return !late || s < now - 60000 ? { key: m.key, s, e: m.e } : null;
 }
 const PLANS = new Map();          // uid -> { at, next, sig, blocks, info, items }
 const dirty = new Set(), byClock = new Set();   // byClock: re-planned only because time passed

@@ -23,6 +23,13 @@ test('openEnd: 30 min more each time the end is reached', () => {
   assert.equal(openEnd(t, t + 30 * M), t + 60 * M);
 });
 
+test('also when the plan was not redone since the block began', () => {
+  const b = planUser(u, now).blocks.find(x => x.key === String(tid));
+  planUser(u, b.s - 10 * 60000);                      // last planned before it began
+  assert.equal(missedStart(u, b.s + 10 * 60000).s, b.s);
+  assert.equal(missedStart(u, b.s + 30000), null, 'not in its first minute');
+});
+
 test('a block started late starts from its planned time and keeps going until Done', () => {
   const b = planUser(u, now).blocks.find(x => x.key === String(tid));
   assert.ok(b, 'planned');

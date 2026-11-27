@@ -492,7 +492,7 @@ export default async function apiRoutes(app) {
     const end = Math.max(0, ...Object.values(p.info).map(i => i.end || 0));
     const projectEnds = {};
     for (const b of p.blocks) { const u = p.units[b.key]; if (u) projectEnds[u.t.project_id] = Math.max(projectEnds[u.t.project_id] || 0, b.e); }
-    return { now, user: uid, projectEnds, blocks, units, later, unplaced, busy: busy.filter(b => b.kind !== 'event' && b.kind !== 'buffer'), events: evs, moved, done: [...doneT, ...doneO], log, active: act ? { ...act, until: act.until ? openEnd(act.until, now) : null } : null, late: act ? null : missedStart(uid, now), nextKeys: order.slice(0, 8), nextUnits: Object.fromEntries(order.slice(0, 8).map(k => [k, unitOut(p.units[k], p.info[k])])), projectedEnd: end || null };
+    return { now, user: uid, projectEnds, blocks, units, later, unplaced, busy: busy.filter(b => b.kind !== 'event' && b.kind !== 'buffer'), events: evs, moved, done: [...doneT, ...doneO], log, active: act ? { ...act, until: act.until ? openEnd(act.until, now) : null } : null, late: act ? null : missedStart(uid, now, { late: false }), nextKeys: order.slice(0, 8), nextUnits: Object.fromEntries(order.slice(0, 8).map(k => [k, unitOut(p.units[k], p.info[k])])), projectedEnd: end || null };
   });
   // a shared project: when the other members are planned to work on its tasks (only those blocks, nothing else of their calendars)
   app.get('/api/projects/:id/team', async req => {

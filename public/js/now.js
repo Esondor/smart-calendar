@@ -62,7 +62,9 @@ export function FocusCard({ plan, big = true }) {
   if (!u) return html`<div class="focus idle"><div class="ft">Nothing planned</div></div>`;
   const run = running(plan, u), rs = run && plan.active.mode === 'r', used = usedMin(plan, u), planned = Math.max(u.duration || 0, 1);
   const startsLater = !run && u.first && u.first > Date.now() + 60000;
-  const late = plan.late && plan.late.key === u.key ? plan.late : null;   // forgot to start: from the planned time, 30 min more each time, until Done
+  // forgot to start: from the planned time, 30 min more each time, until Done; shown a minute into the block, also if the plan was not reloaded
+  const due = !run && (plan.late?.key === u.key ? plan.late : (plan.blocks || []).find(b => b.key === u.key && b.s <= nowMs && b.e > nowMs));
+  const late = due && due.s < nowMs - 60000 ? due : null;
   const ctx = context(u);
   const act = async (fn, msg) => { try { await fn(); await load(['plan', 'tasks']); if (msg) toast(msg); } catch (e) { toast(e.message); } };
   const p = { task: u.taskId, period: u.period || 0 };
