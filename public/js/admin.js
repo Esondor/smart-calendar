@@ -232,11 +232,20 @@ function Displays() {
     if (v) { const r = await act(() => post('/api/admin/displays', v)); if (r) { setMade(`${base}/wall#key=${r.token}`); reload(); } }
   };
   const copy = t => navigator.clipboard?.writeText(t).then(() => toast('Copied'));
+  // Household: everyone who shares a project with the display's owner, also people added later
+  const people = async d => {
+    const v = await openModal(close => { const B = () => { const [hh, setHh] = useState(!d.users.length), [sel, setSel] = useState(d.users.length ? d.users : users.map(u => u.id)); return html`<div class="modal sm"><h3>${d.name}</h3>
+      <label class="calrow"><input type="checkbox" class="sq" checked=${hh} onChange=${e => setHh(e.target.checked)}/>Household</label>
+      ${!hh && html`<div style="margin:8px 0 12px">${users.map(u => html`<label class="calrow"><input type="checkbox" class="sq" checked=${sel.includes(u.id)} onChange=${e => setSel(e.target.checked ? [...sel, u.id] : sel.filter(x => x !== u.id))}/><${Avatar} id=${u.id}/>${u.name}</label>`)}</div>`}
+      <div class="acts"><button onClick=${() => close(null)}>Cancel</button><button class="pri" disabled=${!hh && !sel.length} onClick=${() => close({ users: hh ? [] : sel })}>Save</button></div></div>`; }; return html`<${B}/>`; });
+    if (v) act(() => api('/api/admin/displays/' + d.id, { method: 'PUT', body: v }), null, reload);
+  };
   return html`
     ${made && html`<div class="box"><div class="cell"><code style="user-select:all;word-break:break-all;flex:1">${made}</code><button class="ghost" onClick=${() => copy(made)}>Copy</button></div>
       <p class="hint" style="margin:6px 0 0">Shown once. Open on the tablet, or use it in Home Assistant.</p></div>`}
-    <div class="box">${L.map(d => html`<div class="cell"><span>${d.name} <span class="hint">${d.users.map(id => (users.find(u => u.id === id) || {}).name).filter(Boolean).join(', ')}</span></span>
+    <div class="box">${L.map(d => html`<div class="cell"><span>${d.name} <span class="hint">${d.users.length ? d.users.map(id => (users.find(u => u.id === id) || {}).name).filter(Boolean).join(', ') : 'Household'}</span></span>
         <span class="hint">${d.last_used ? ago(d.last_used) : 'Never used'}</span>
+        <button class="icon" title="People" onClick=${() => people(d)}>${I('people', 15)}</button>
         <button class="icon" title="Remove" onClick=${async () => { if (await confirmDialog(`Remove “${d.name}”? The tablet stops working.`, 'Remove', true)) act(() => del('/api/admin/displays/' + d.id), null, reload); }}>${I('trash', 15)}</button></div>`)}
       ${!L.length && html`<p class="hint" style="margin:0 0 6px">No displays</p>`}
       <div class="cell"><button class="ghost" style="padding-left:0" onClick=${create}>${I('plus', 15)}New Display</button></div></div>

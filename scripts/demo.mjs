@@ -183,6 +183,7 @@ snap['/api/me/tokens'] = []; snap['/api/me/sessions'] = [{ id: 'demo', created_a
 await rec('/api/plan', `/api/plan?from=${at(-28, 0)}&to=${at(42, 0)}`);
 for (const p of snap['/api/projects']) await rec('/api/activity?project=' + p.id);
 for (const p of snap['/api/projects'].filter(p => p.kind === 'outline')) await rec(`/api/projects/${p.id}/order`);
+for (const p of snap['/api/projects'].filter(p => p.members.length > 1)) await rec(`/api/projects/${p.id}/team`);
 Object.assign(snap['/api/bootstrap'], { version: 'demo', must2fa: false });
 await app.close();
 if (process.env.DEMO_DATA_DIR) { const { newToken } = await import('../server/ext.js'); fs.writeFileSync(path.join(process.env.DEMO_DATA_DIR, 'demo-token'), newToken(me, 'api', 'Mac'));

@@ -4,6 +4,7 @@ import { I } from './icons.js';
 import OutlineView from './outline.js';
 import ProjectFocus from './pfocus.js';
 import OrderView from './order.js';
+import { TeamButton } from './team.js';
 import { isLeaf } from './tasks.js';
 
 const COLORS = ['#1971c2', '#0f5f5c', '#c2255c', '#e8590c', '#7048e8', '#2b8a3e', '#e67700', '#0c8599', '#868e96'];
@@ -59,17 +60,19 @@ export async function projectSettings(p) {
   } catch (e) { toast(e.message); }
 }
 async function share(p) {
-  const u = await openModal(close => { const B = () => { const [v, setV] = useState('');
+  const u = await openModal(close => { const B = () => { const [v, setV] = useState(''), [n, setN] = useState('');
     const others = S.state.users.filter(x => !p.members.some(m => m.id === x.id));
     return html`<div class="modal sm"><h3>Share “${p.name}”</h3>
       <ul class="feed">${p.members.map(m => html`<li><${Avatar} id=${m.id}/> <span class="grow">${m.name}${m.role === 'owner' ? html` <span class="hint">Owner</span>` : ''}</span>
         ${m.role !== 'owner' && (p.owner_id === S.state.me.id || m.id === S.state.me.id) ? html`<button class="sk" onClick=${() => close({ remove: m.id })}>Remove</button>` : ''}</li>`)}</ul>
       ${others.length ? html`<div class="row" style="margin-top:10px"><select class="grow" value=${v} onChange=${e => setV(e.target.value)}><option value="">Add Person</option>${others.map(o => html`<option value=${o.id}>${o.name} (@${o.username})</option>`)}</select>
         <button class="pri" disabled=${!v} onClick=${() => close({ add: +v })}>Add</button></div>` : ''}
+      <div class="row" style="margin-top:10px"><input type="text" class="grow" placeholder="Username" value=${n} onInput=${e => setN(e.target.value)} onKeyDown=${e => e.key === 'Enter' && n.trim() && close({ username: n.trim() })}/>
+        <button disabled=${!n.trim()} onClick=${() => close({ username: n.trim() })}>Add</button></div>
       <div class="box" style="margin:14px 0 0"><${InviteBox} project=${p}/></div>
       <div class="acts"><button onClick=${() => close(null)}>Close</button></div></div>`; }; return html`<${B}/>`; });
   if (!u) return;
-  try { if (u.add) await post(`/api/projects/${p.id}/members`, { user_id: u.add }); if (u.remove) await del(`/api/projects/${p.id}/members/${u.remove}`); await load(['projects', 'tasks', 'plan']); } catch (e) { toast(e.message); }
+  try { if (u.add) await post(`/api/projects/${p.id}/members`, { user_id: u.add }); if (u.username) await post(`/api/projects/${p.id}/members`, { username: u.username }); if (u.remove) await del(`/api/projects/${p.id}/members/${u.remove}`); await load(['boot', 'projects', 'tasks', 'plan']); } catch (e) { toast(e.message); }
 }
 
 function Card({ t, cols, onDragStart }) {
@@ -111,9 +114,9 @@ export default function ProjectView({ id }) {
   const pick = v => { setView(v); try { localStorage.setItem('pv-' + id, v); } catch {} };
   const seg = html`<div class="seg pvseg"><button class=${view === 'overview' ? 'on' : ''} onClick=${() => pick('overview')}>Overview</button><button class=${view === 'detail' || (view === 'order' && p.kind !== 'outline') ? 'on' : ''} onClick=${() => pick('detail')}>${p.kind === 'outline' ? 'Outline' : 'Board'}</button>${p.kind === 'outline' && html`<button class=${view === 'order' ? 'on' : ''} onClick=${() => pick('order')}>Order</button>`}</div>`;
   if (view === 'overview') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/><span class="grow"></span>
-    <span class="avs">${p.members.map(m => html`<${Avatar} id=${m.id}/>`)}</span><button class="icon" title="Share" aria-label="Share" onClick=${() => share(p)}>${I('people')}</button><button class="icon" title="Project Settings" onClick=${() => projectSettings(p)}>${I('gear')}</button></div><${ProjectFocus} p=${p}/></div>`;
-  if (p.kind === 'outline' && view === 'order') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/></div><${OrderView} p=${p}/></div>`;
-  if (p.kind === 'outline') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/></div><${OutlineView} p=${p}/></div>`;
+    <span class="avs">${p.members.map(m => html`<${Avatar} id=${m.id}/>`)}</span><${TeamButton} p=${p}/><button class="icon" title="Share" aria-label="Share" onClick=${() => share(p)}>${I('people')}</button><button class="icon" title="Project Settings" onClick=${() => projectSettings(p)}>${I('gear')}</button></div><${ProjectFocus} p=${p}/></div>`;
+  if (p.kind === 'outline' && view === 'order') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/><span class="grow"></span><${TeamButton} p=${p}/></div><${OrderView} p=${p}/></div>`;
+  if (p.kind === 'outline') return html`<div class="pvwrap"><div class="ptools">${seg}<${Progress} p=${p}/><span class="grow"></span><${TeamButton} p=${p}/></div><${OutlineView} p=${p}/></div>`;
   const tasks = st.tasks.filter(t => t.project_id === p.id && isLeaf(t));
   const cols = p.columns.length ? p.columns : ['To do', 'Done'];
   const byCol = cols.map((_, i) => tasks.filter(t => (t.status === 'done' && !t.recur ? cols.length - 1 : Math.min(t.col, cols.length - 1)) === i).sort((a, b) => a.sort - b.sort || (a.sched?.first || Infinity) - (b.sched?.first || Infinity)));
@@ -130,6 +133,7 @@ export default function ProjectView({ id }) {
   return html`<div style="display:flex;flex-direction:column;height:100%">
     <div class="ptools">${seg}<${Progress} p=${p}/>
       <span class="avs">${p.members.map(m => html`<${Avatar} id=${m.id}/>`)}</span>
+      <${TeamButton} p=${p}/>
       <button class="icon" title="Share" aria-label="Share" onClick=${() => share(p)}>${I('people')}</button>
       <button class="icon" title="Project Settings" onClick=${() => projectSettings(p)}>${I('gear')}</button>
       <button onClick=${async () => setFeed(feed ? null : await api('/api/activity?project=' + id))}>${feed ? 'Hide' : 'Activity'}</button>

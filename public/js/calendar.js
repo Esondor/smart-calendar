@@ -40,7 +40,7 @@ export default function CalendarView() {
   const mobile = matchMedia('(max-width:860px)').matches, GUT = mobile ? 44 : 52;
   const [mode, setMode] = useState(() => stored('cal-mode', mobile ? 'day' : 'week'));
   const month = mode === 'month', n = mode === 'day' ? 1 : mobile ? 3 : 7;
-  const [who, setWho] = useState(st.me.id);
+  const who = st.me.id;   // only your own calendar
   const [collapse, setCollapse] = useState(() => stored('cal-collapse', '1') === '1');
   const target0 = d => month ? monday(firstOfMonth(d)) : mode === 'week' && !mobile ? monday(d) : startOfDay(d);
   const [focus, setFocus] = useState(() => month ? firstOfMonth(Date.now()) : target0(Date.now()));   // first visible day / the visible month
@@ -54,7 +54,7 @@ export default function CalendarView() {
   const cw = size.w ? (size.w - GUT) / n : 0, rowH = size.h ? (size.h - 28) / 5 : 0;
   const span = month ? MWIN * 7 : WIN, to = addDays(from, span);
   const [plan, setPlan] = useState(null);
-  useEffect(() => { api(`/api/plan?from=${from}&to=${to}&user=${who}`).then(setPlan).catch(e => toast(e.message)); }, [from, mode, who, st.plan]);
+  useEffect(() => { api(`/api/plan?from=${from}&to=${to}`).then(setPlan).catch(e => toast(e.message)); }, [from, mode, st.plan]);
   useEffect(() => { const el = sc.current; if (!el) return; const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight })); ro.observe(el); return () => ro.disconnect(); }, [mode]);
 
   // scroll position: slide to a day; keep the view still when the rendered window moves
@@ -191,7 +191,6 @@ export default function CalendarView() {
   const today = () => go(month ? monday(firstOfMonth(Date.now())) : target0(Date.now()), true);
   const step = k => go(month ? monday(firstOfMonth(focus, k)) : addDays(focus, k * n), true);
 
-  const partners = st.users.filter(u => u.id !== st.me.id && st.projects.some(p => p.members.some(m => m.id === u.id)));
   const top = ms => ((ms - startOfDay(ms)) / 3600e3 - H0) * hh;
   const toggleCollapse = () => { store('cal-collapse', collapse ? '0' : '1'); setCollapse(!collapse); };
 
@@ -319,7 +318,6 @@ export default function CalendarView() {
       <button onClick=${today}>Today</button>
       <button class="icon calnav" title="Next" onClick=${() => step(1)}>${I('right')}</button>
       <button class=${'icon' + (collapse ? '' : ' on')} title=${collapse ? 'Show non-blocking events' : 'Minimise non-blocking events'} onClick=${toggleCollapse}>${I(collapse ? 'eyeoff' : 'eye', 18)}</button>
-      ${partners.length > 0 && html`<select value=${who} onChange=${e => setWho(+e.target.value)}><option value=${st.me.id}>${st.me.name}</option>${partners.map(u => html`<option value=${u.id}>${u.name}</option>`)}</select>`}
     </div>
     ${month ? html`
       ${mobile && html`<div class="mtitle">${MONTHS[new Date(focus).getMonth()]} <span>${new Date(focus).getFullYear()}</span></div>`}

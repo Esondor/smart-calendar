@@ -266,7 +266,7 @@ async function pushPlanNow(uid, plan) {
 
 async function reconcile(uid, cal, desired, plan, now, endMs) {
   const acc = get('SELECT * FROM accounts WHERE id = ?', cal.account_id);
-  const existing = all('SELECT * FROM plan_events WHERE calendar_id = ? ORDER BY start', cal.id).filter(x => x.end > now - 864e5);
+  const existing = all('SELECT * FROM plan_events WHERE calendar_id = ? ORDER BY start', cal.id).filter(x => x.end > now - 7 * 864e5);
   const used = new Set(), keep = [], create = [], patch = [];
   for (const d of desired) {
     const { taskId, period } = parseKey(d.key);
@@ -304,10 +304,20 @@ async function reconcile(uid, cal, desired, plan, now, endMs) {
         run('DELETE FROM plan_events WHERE id = ?', x.id); np++;
         continue;
       }
-      if (x.start < now) {    // past or running: keep as history, mark done, trim the unused rest
+      if (x.start < now) {
+        // past or running: stays in the calendar only if it was worked on (a timer session in it, the timer running now)
+        // or the task was done from it on; a block that just passed by, was moved or planned again goes away
+        const until = Math.min(x.end, now);
+        const tracked = !!get('SELECT 1 FROM work_log WHERE user_id = ? AND task_id = ? AND end > ? AND start < ?', uid, x.task_id, x.start, until)
+          || (x.end > now && !!get('SELECT 1 FROM active WHERE user_id = ? AND task_id = ?', uid, x.task_id));
+        const doneHere = done && (t.recur || (t.done_at || 0) >= x.start - TOL);
+        if (!tracked && !doneHere) {
+          await api(acc, 'DELETE', path).catch(e => { if (e.status !== 404 && e.status !== 410) throw e; });
+          run('DELETE FROM plan_events WHERE id = ?', x.id); nd++; continue;
+        }
         const body = {};
         if (done && !DONE_RE.test(x.title) && !/^[\p{L}\p{N}_-]{1,12} - [✓✔]/u.test(x.title)) body.summary = doneTagged(x.title);
-        if (x.end > now) { if (now - x.start < 5 * 60000 && !done) { await api(acc, 'DELETE', path).catch(e => { if (e.status !== 404 && e.status !== 410) throw e; }); nd++; run('DELETE FROM plan_events WHERE id = ?', x.id); continue; } body.end = { dateTime: new Date(Math.ceil(now / 60000) * 60000).toISOString() }; }
+        if (x.end > now) { body.end = { dateTime: new Date(Math.ceil(now / 60000) * 60000).toISOString() }; }
         if (Object.keys(body).length) await api(acc, 'PATCH', path, body).catch(e => { if (e.status !== 404 && e.status !== 410) throw e; });
         run('DELETE FROM plan_events WHERE id = ?', x.id);
       } else {

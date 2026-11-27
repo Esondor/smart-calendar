@@ -10,7 +10,7 @@ const tasks = new Map([
   [2, { id: 2, title: 'Someone else', description: '', done: false, project_id: 7, priority: 1, due_date: '0001-01-01T00:00:00Z', start_date: '0001-01-01T00:00:00Z', assignees: [{ id: 9 }], labels: [], updated: 'u1' }],
   [3, { id: 3, title: 'Calibrate stage', description: '', done: false, project_id: 7, priority: 2, due_date: '0001-01-01T00:00:00Z', start_date: '0001-01-01T00:00:00Z', assignees: [{ id: 42 }], labels: [{ title: '2h' }], updated: 'u1' }],
 ]);
-const hooks = [], authCalls = [], moves = [];
+const hooks = [], authCalls = [], moves = [], uploads = [];
 globalThis.fetch = async (url, opt = {}) => {
   const u = new URL(url), p = u.pathname.replace('/api/v1', ''), m = opt.method || 'GET';
   const json = (o, s = 200) => new Response(JSON.stringify(o), { status: s });
@@ -32,7 +32,10 @@ globalThis.fetch = async (url, opt = {}) => {
   if (p === '/projects/7/views/71/tasks') return json([{ id: 710, title: 'Dokumente & Infos', tasks: [{ id: 20, title: 'Datenblätter', attachments: [{ id: 5, created: '2026-11-01T10:00:00Z', file: { name: 'Nozzle.pdf', mime: 'application/pdf', size: 2048 } }] }] },
     { id: 711, title: 'To-Do', tasks: [...tasks.values()].filter(t => !t.done && t.project_id === 7) }]);
   if (p === '/tasks/20/attachments/5') return new Response('%PDF-1.4 test', { status: 200, headers: { 'content-type': 'application/pdf' } });
-  if (p === '/projects/7/views/71/buckets') return json([{ id: 711, title: 'To-Do' }, { id: 712, title: 'In Progress' }, { id: 713, title: 'Fertig' }]);
+  if (p === '/projects/7/tasks' && m === 'PUT') { const b = JSON.parse(opt.body); uploads.push(['task', b.title]); return json({ id: 99, title: b.title }); }
+  const am = p.match(/^\/tasks\/(\d+)\/attachments$/);
+  if (am && m === 'PUT') { const f = opt.body.get('files'); uploads.push(['file', +am[1], f.name, await f.text()]); return json({ success: [{ id: 1 }] }); }
+  if (p === '/projects/7/views/71/buckets') return json([{ id: 710, title: 'Dokumente & Infos' }, { id: 711, title: 'To-Do' }, { id: 712, title: 'In Progress' }, { id: 713, title: 'Fertig' }]);
   const bm = p.match(/^\/projects\/7\/views\/71\/buckets\/(\d+)\/tasks$/);
   if (bm && m === 'POST') { moves.push([JSON.parse(opt.body).task_id, +bm[1]]); return json({}); }
   const wh = p.match(/^\/projects\/(\d+)\/webhooks$/);
@@ -45,7 +48,7 @@ globalThis.fetch = async (url, opt = {}) => {
 const { run, get, all } = await import('../server/db.js');
 const { encrypt } = await import('../server/crypto.js');
 const { createUser } = await import('../server/auth.js');
-const { syncVikunja, pushDone, durationOf, vikunjaUser, moveToBucket, docFiles, attachment, forgetFiles } = await import('../server/sync/vikunja.js');
+const { syncVikunja, pushDone, durationOf, vikunjaUser, moveToBucket, docFiles, attachment, forgetFiles, uploadFile } = await import('../server/sync/vikunja.js');
 const { setDone } = await import('../server/actions.js');
 
 const uid = createUser({ username: 'vk', name: 'V', password: 'long password 123' });
@@ -195,4 +198,13 @@ test('files: the documents bucket\'s tasks are folders; their attachments are li
   assert.match((await app.inject({ url: `/api/files/${accId}/20/5?p=7&download=1` })).headers['content-disposition'], /^attachment/);
   await app.close();
   tasks.delete(20);
+});
+
+test('upload: a new item in the files bucket with the file attached, or a file into an existing one', async () => {
+  const r = await uploadFile(acc(), 7, { name: 'Offer Smith', fileName: 'offer.pdf', mime: 'application/pdf', data: Buffer.from('%PDF x') });
+  assert.equal(r.folder, 99);
+  assert.deepEqual(uploads.slice(0, 2), [['task', 'Offer Smith'], ['file', 99, 'offer.pdf', '%PDF x']]);
+  assert.ok(moves.some(([t, b]) => t === 99 && b === 710), 'into the files bucket');
+  tasks.set(20, { id: 20, title: 'Datenblätter', project_id: 7, done: true }); await uploadFile(acc(), 7, { folder: 20, fileName: 'more.txt', data: Buffer.from('hi') });
+  assert.deepEqual(uploads.at(-1), ['file', 20, 'more.txt', 'hi']);
 });

@@ -344,9 +344,31 @@ test('a Vikunja account\'s own calendar: blocks titled with your tag, done as "T
   // a session that ran: kept, cut to its end, marked done after the tag
   const row = get('SELECT * FROM plan_events WHERE ext_id = ?', ev.id);
   run('UPDATE plan_events SET start = ?, end = ? WHERE id = ?', Date.now() - 30 * 60000, Date.now() + 30 * 60000, row.id);
-  run(`UPDATE tasks SET status = 'done' WHERE id = ?`, vid);
+  run(`UPDATE tasks SET status = 'done', done_at = ? WHERE id = ?`, Date.now(), vid);
   await google.pushPlan(uid, () => planUser(uid));
   assert.equal(store.get(ev.id).summary, 'JD - ✓ Order nozzles');
   run('DELETE FROM tasks WHERE id = ?', vid); run('DELETE FROM accounts WHERE id = ?', vacc); store.delete(ev.id);
+  const s2 = settingsOf(uid); s2.plan = keep; saveSettings(uid, s2);
+});
+
+test('a block that passed without work goes away; worked on or done from it stays', async () => {
+  const t0 = Date.now(), mk = title => Number(run(`INSERT INTO tasks(project_id, title, duration, created_by, assignee_id, created_at, updated_at, start_after) VALUES (?, ?, 30, ?, ?, ?, ?, ?)`,
+    pid, title, uid, uid, t0, t0, new Date(t0 + 864e5).toISOString().slice(0, 10)).lastInsertRowid);
+  const work = get(`SELECT * FROM calendars WHERE ext_id = 'work@x'`);
+  const st = settingsOf(uid), keep = { ...st.plan }; st.plan.calendarId = work.id; st.plan.days = 21; saveSettings(uid, st);
+  const a = mk('Skipped thing'), b = mk('Worked thing'), c = mk('Ticked thing');
+  await google.pushPlan(uid, () => planUser(uid));
+  const evOf = title => [...store.values()].find(e => e.summary === title);
+  const ea = evOf('Skipped thing'), eb = evOf('Worked thing'), ec = evOf('Ticked thing');
+  assert.ok(ea && eb && ec, JSON.stringify([...store.values()].map(e => e.summary)));
+  // all three an hour ago
+  for (const e of [ea, eb, ec]) run('UPDATE plan_events SET start = ?, end = ? WHERE ext_id = ?', t0 - 90 * 60000, t0 - 60 * 60000, e.id);
+  run("INSERT INTO work_log(user_id, task_id, kind, start, end) VALUES (?, ?, 'work', ?, ?)", uid, b, t0 - 85 * 60000, t0 - 65 * 60000);
+  run(`UPDATE tasks SET status = 'done', done_at = ? WHERE id = ?`, t0 - 30 * 60000, c);
+  await google.pushPlan(uid, () => planUser(uid));
+  assert.ok(!store.has(ea.id) || store.get(ea.id).status === 'cancelled', 'not worked on: removed');
+  assert.ok(store.has(eb.id) && store.get(eb.id).status !== 'cancelled', 'worked on: kept');
+  assert.equal(store.get(ec.id)?.summary, '✓ Ticked thing', 'done: kept, ticked');
+  for (const id of [a, b, c]) run('DELETE FROM tasks WHERE id = ?', id);
   const s2 = settingsOf(uid); s2.plan = keep; saveSettings(uid, s2);
 });

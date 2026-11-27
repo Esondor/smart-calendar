@@ -271,3 +271,39 @@ export async function attachment(acc, taskId, attId) {
   if (!r.ok) throw Object.assign(new Error('Vikunja: file not found'), { status: r.status === 404 ? 404 : 502 });
   return r;
 }
+
+// ---------- upload: a file into a folder, or a new folder (a task in the files bucket) named by the user ----------
+async function docsBucket(acc, pid) {
+  let views = null; try { views = await vk(acc, 'GET', `/projects/${pid}/views`); } catch (e) { if (e.status !== 404) throw e; }
+  if (Array.isArray(views)) {
+    for (const v of views.filter(v => v.view_kind === 'kanban' || v.view_kind === 3)) {
+      const bs = await vk(acc, 'GET', `/projects/${pid}/views/${v.id}/buckets`).catch(() => []);
+      const b = (Array.isArray(bs) ? bs : []).find(x => DOCS.test(String(x.title || '').trim()));
+      if (b) return { view: v.id, bucket: b.id };
+    }
+    return null;
+  }
+  const bs = await vk(acc, 'GET', `/projects/${pid}/buckets`).catch(() => []);
+  const b = (Array.isArray(bs) ? bs : []).find(x => DOCS.test(String(x.title || '').trim()));
+  return b ? { bucket: b.id } : null;
+}
+export async function uploadFile(acc, vpid, { folder, name, fileName, mime, data }) {
+  let tid = folder;
+  if (!tid) {
+    const where = await docsBucket(acc, vpid);
+    if (!where) throw Object.assign(new Error('This project has no files bucket (e.g. "Dokumente & Infos") in its Kanban'), { status: 400 });
+    const t = await vk(acc, 'PUT', `/projects/${vpid}/tasks`, { title: name, ...(where.view ? {} : { bucket_id: where.bucket }) });
+    if (where.view) await vk(acc, 'POST', `/projects/${vpid}/views/${where.view}/buckets/${where.bucket}/tasks`, { task_id: t.id, bucket_id: where.bucket, project_view_id: where.view });
+    tid = t.id;
+  }
+  const { url, token } = decrypt(acc.secret);
+  if (folder) await vk(acc, 'GET', '/tasks/' + tid);   // the folder is there; signs in on the sign-in page if needed
+  const ses = sessions.get(acc.secret), fd = new FormData();
+  fd.append('files', new Blob([data], { type: mime || 'application/octet-stream' }), fileName);
+  const r = await fetch(`${url.replace(/\/$/, '')}/api/v1/tasks/${tid}/attachments`, { method: 'PUT', body: fd, signal: AbortSignal.timeout(120000),
+    headers: { authorization: 'Bearer ' + token, ...(ses?.cookie ? { cookie: ses.cookie } : {}) } });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || j?.errors?.length) throw Object.assign(new Error('Vikunja: ' + (j?.errors?.[0]?.message || j?.message || 'upload failed (' + r.status + ')')), { status: 502 });
+  forgetFiles(acc.id);
+  return { folder: tid };
+}

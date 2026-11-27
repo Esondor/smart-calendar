@@ -135,6 +135,7 @@
     if (p === '/api/plan') return plan();
     if (p === '/api/activity') return D('/api/activity?project=' + q.get('project')) || [];
     if (p in db) return db[p];
+    if (/^\/api\/projects\/\d+\/team$/.test(p)) return { blocks: [] };
     if (p === '/api/push/count') return { n: 0 };
     if (/^\/api\/(files|places|travel)/.test(p)) return [];
     return {};

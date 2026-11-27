@@ -4,7 +4,7 @@ import { needs2fa } from './policy.js';
 import { all, get, run, tx, J } from './db.js';
 import { encrypt } from './crypto.js';
 import { httpErr } from './auth.js';
-import { settingsOf, saveSettings, publicUser, allUsers, projectIdsFor, isMember, membersOf, projectRow, taskRow, taskById, canEditTask, logActivity } from './models.js';
+import { settingsOf, saveSettings, publicUser, allUsers, contactsOf, projectIdsFor, isMember, membersOf, projectRow, taskRow, taskById, canEditTask, logActivity } from './models.js';
 import { getPlan, markDirty, usersOfProject, parseKey, keyOf, assigneeOf, busyOf, shownBusy, calendarEvents, joinLink, eventRanker, winOf } from './planner.js';
 import * as A from './actions.js';
 import { bus, notifyUsers } from './bus.js';
@@ -12,7 +12,7 @@ import * as google from './sync/google.js';
 import * as mirror from './sync/mirror.js';
 import { withLock } from './lock.js';
 import { normalizeUrl } from './sync/ics.js';
-import { vikunjaUser, docFiles, attachment, forgetFiles } from './sync/vikunja.js';
+import { vikunjaUser, docFiles, attachment, forgetFiles, uploadFile } from './sync/vikunja.js';
 import { syncAccount } from './sync/loop.js';
 import { vapidPublicKey, sendPush } from './push.js';
 import { finishEvent } from './eventdone.js';
@@ -88,7 +88,7 @@ function taskPatch(body, t) {
 export default async function apiRoutes(app) {
   // ---------- bootstrap ----------
   app.get('/api/bootstrap', async req => { if (req.user.is_admin) learnBaseUrl(req); return {
-    me: publicUser(req.user), mail: mailReady(), maps: maps.mapsReady(), settings: settingsOf(req.user), users: allUsers(),
+    me: publicUser(req.user), mail: mailReady(), maps: maps.mapsReady(), settings: settingsOf(req.user), users: req.user.is_admin ? allUsers() : contactsOf(req.user.id),
     google: google.enabled(), vapid: vapidPublicKey(), baseUrl: baseUrl(), version: '1.2.0',
     hasAccounts: !!get('SELECT 1 FROM accounts WHERE user_id = ?', req.user.id), must2fa: needs2fa(req.user),
   }; });
@@ -172,8 +172,11 @@ export default async function apiRoutes(app) {
   });
   app.post('/api/projects/:id/members', async req => {
     const pid = needProject(req.user.id, req.params.id);
-    const u = get('SELECT id, name FROM users WHERE username = ? OR id = ?', str(req.body?.username, 40).toLowerCase(), int(req.body?.user_id, -1));
-    if (!u) throw httpErr(404, 'No such user on this server');
+    // by id only people you already know (see contactsOf); anyone else by their exact username
+    const byId = int(req.body?.user_id, -1), name = str(req.body?.username, 40).trim().toLowerCase().replace(/^@/, '');
+    const u = byId > 0 ? (contactsOf(req.user.id).some(c => c.id === byId) ? get('SELECT id, name FROM users WHERE id = ? AND disabled = 0', byId) : null)
+      : name ? get('SELECT id, name FROM users WHERE username = ? AND disabled = 0', name) : null;
+    if (!u) throw httpErr(404, 'No such user');
     run(`INSERT OR IGNORE INTO project_members(project_id, user_id, role) VALUES (?, ?, 'editor')`, pid, u.id);
     logActivity(pid, req.user.id, `Shared with ${u.name}`); audit(req, 'project.share', get('SELECT name FROM projects WHERE id = ?', pid).name, u.id); A.touchProject(pid);
     return membersOf(pid);
@@ -433,7 +436,7 @@ export default async function apiRoutes(app) {
 
   // ---------- plan + calendar view ----------
   app.get('/api/plan', async req => {
-    const uid = req.query.user && isFinite(+req.query.user) && shareProject(req.user.id, +req.query.user) ? +req.query.user : req.user.id;
+    const uid = req.user.id;   // only your own calendar; other members' plans are seen per shared project (/api/projects/:id/team)
     const now = Date.now(), from = int(req.query.from, now - 864e5), to = int(req.query.to, now + 14 * 864e5);
     const p = getPlan(uid);
     const blocks = p.blocks.filter(b => b.e > from && b.s < to).map(b => ({ ...b, ...parseKey(b.key) }));
@@ -465,7 +468,19 @@ export default async function apiRoutes(app) {
     for (const b of p.blocks) { const u = p.units[b.key]; if (u) projectEnds[u.t.project_id] = Math.max(projectEnds[u.t.project_id] || 0, b.e); }
     return { now, user: uid, projectEnds, blocks, units, later, unplaced, busy: busy.filter(b => b.kind !== 'event' && b.kind !== 'buffer'), events: evs, moved, done: [...doneT, ...doneO], log, active: act || null, nextKeys: order.slice(0, 8), nextUnits: Object.fromEntries(order.slice(0, 8).map(k => [k, unitOut(p.units[k], p.info[k])])), projectedEnd: end || null };
   });
-  function shareProject(a, b) { return a === b || !!get('SELECT 1 FROM project_members x JOIN project_members y ON x.project_id = y.project_id WHERE x.user_id = ? AND y.user_id = ?', a, b); }
+  // a shared project: when the other members are planned to work on its tasks (only those blocks, nothing else of their calendars)
+  app.get('/api/projects/:id/team', async req => {
+    const pid = +req.params.id; if (!isMember(req.user.id, pid)) throw httpErr(404, 'Project not found');
+    const now = Date.now(), to = now + Math.max(1, Math.min(60, +req.query.days || 21)) * 864e5, out = [];
+    for (const m of membersOf(pid).filter(m => m.id !== req.user.id)) {
+      let p; try { p = getPlan(m.id); } catch { continue; }
+      for (const b of p.blocks) {
+        const u = p.units[b.key]; if (!u || u.t.project_id !== pid || b.e <= now || b.s >= to) continue;
+        out.push({ user: m.id, start: b.s, end: b.e, task: u.t.id, title: u.t.title });
+      }
+    }
+    return { blocks: out.sort((a, b) => a.start - b.start) };
+  });
   // a task written to its own calendar (a flexible appointment in Family) takes that calendar's color
   const calColor = id => id ? get('SELECT color FROM calendars WHERE id = ?', +id)?.color || null : null;
   function unitOut(u, i = {}) {
@@ -556,6 +571,22 @@ export default async function apiRoutes(app) {
       catch (e) { out.push({ account: a.id, label: a.label, projects: [], error: e.message }); }
     }
     return out;
+  });
+  // upload: the file is the body; into a folder (?folder=<task>) or a new folder named ?name= in the project's files bucket
+  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: 50 * 1024 * 1024 }, (req, body, done) => done(null, body));
+  app.post('/api/files/upload', { bodyLimit: 50 * 1024 * 1024 }, async req => {
+    const q = req.query, pid = +q.project;
+    const pr = get(`SELECT ext_account, ext_id FROM projects WHERE id = ? AND ext_source = 'vikunja'`, pid);
+    if (!pr || !isMember(req.user.id, pid)) throw httpErr(404, 'Not found');
+    const a = get(`SELECT * FROM accounts WHERE id = ? AND user_id = ? AND kind = 'vikunja'`, pr.ext_account, req.user.id); if (!a) throw httpErr(404, 'Not found');
+    if (!Buffer.isBuffer(req.body) || !req.body.length) throw httpErr(400, 'No file');
+    const fileName = String(q.file || 'File').replace(/[\\/\0]/g, '_').slice(0, 200) || 'File';
+    let folder = null;
+    if (q.folder) { const f = await docFiles(a, 0, pr.ext_id); folder = f.list.flatMap(p => p.folders).find(x => x.id === +q.folder)?.id; if (!folder) throw httpErr(404, 'Folder not found'); }
+    const name = String(q.name || '').trim().slice(0, 250);
+    if (!folder && !name) throw httpErr(400, 'Name missing');
+    try { const r = await uploadFile(a, pr.ext_id, { folder, name, fileName, mime: String(q.mime || '').slice(0, 100), data: req.body }); audit(req, 'files.upload', fileName); return r; }
+    catch (e) { throw httpErr(e.status || 502, e.message); }
   });
   app.get('/api/files/:acc/:task/:att', async (req, reply) => {
     const a = get(`SELECT * FROM accounts WHERE id = ? AND user_id = ? AND kind = 'vikunja'`, +req.params.acc, req.user.id); if (!a) throw httpErr(404, 'Not found');

@@ -26,6 +26,11 @@ export const saveSettings = (uid, s) => run('UPDATE users SET settings = ? WHERE
 
 export const publicUser = u => u && ({ id: u.id, username: u.username, name: u.name, color: u.color, is_admin: !!u.is_admin, totp_on: !!u.totp_on, email: u.email || '' });   // only ever sent to the user themself
 export const allUsers = () => all('SELECT id, username, name, color, is_admin FROM users ORDER BY id');
+// the people a user may see and pick: themselves, whoever shares a project with them, whoever they invited or was invited by
+export const contactsOf = uid => all(`SELECT id, username, name, color, is_admin FROM users WHERE id = ?
+  OR id IN (SELECT y.user_id FROM project_members x JOIN project_members y ON x.project_id = y.project_id WHERE x.user_id = ?)
+  OR id IN (SELECT used_by FROM invites WHERE created_by = ? AND used_by IS NOT NULL)
+  OR id IN (SELECT created_by FROM invites WHERE used_by = ?) ORDER BY id`, uid, uid, uid, uid);
 
 export const projectIdsFor = uid => all('SELECT project_id FROM project_members WHERE user_id = ?', uid).map(r => r.project_id);
 export const isMember = (uid, pid) => !!get('SELECT 1 FROM project_members WHERE user_id = ? AND project_id = ?', uid, pid);

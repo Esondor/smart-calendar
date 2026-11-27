@@ -1004,7 +1004,8 @@ aside.files button:hover{background:var(--fill2)}
 aside.files .fproj{font-weight:600;font-size:13.5px;padding:6px 8px;margin-top:4px}
 aside.files .fproj .ic{color:var(--muted)}
 aside.files .ffolder{margin:0 0 6px 18px}
-aside.files .fname{font-size:12px;color:var(--muted);padding:4px 8px 2px;text-transform:none}
+aside.files .fname{font-size:12px;color:var(--muted);padding:4px 4px 2px 8px;text-transform:none;display:flex;align-items:center;gap:4px}
+aside.files .fname .icon{opacity:.55}aside.files .fname .icon:hover{opacity:1}
 aside.files .ffile{padding:5px 8px;font-size:13px;font-weight:400;gap:8px}
 aside.files .ffile .fn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 aside.files .fic{flex:none;min-width:30px;font-size:9px;font-weight:700;letter-spacing:.02em;color:var(--acc);background:var(--fill2);border-radius:4px;padding:3px 4px;text-align:center}
@@ -1041,3 +1042,6 @@ ol.how li{margin:2px 0}
 .wo-m i{font-style:normal;font-size:12px}
 .wo-m i.late{color:var(--late)}
 .wo-add{margin:4px 0 0;color:var(--acc)}
+aside.files .tday{font-size:12px;color:var(--muted);padding:10px 8px 4px;font-weight:600}
+aside.files.team .ffile .avatar{flex:none}
+aside.files .fhead b{white-space:nowrap}

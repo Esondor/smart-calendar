@@ -143,6 +143,13 @@ export default async function extRoutes(app) {
     const tok = newToken(req.user.id, 'display', req.body?.name || 'Wall display', users);
     audit(req, 'display.create', String(req.body?.name || '')); return { token: tok };
   });
+  // who a display shows: a fixed list of people, or [] = the household (everyone sharing a project with its owner, also people added later)
+  app.put('/api/admin/displays/:id', async req => {
+    admin(req);
+    const users = (Array.isArray(req.body?.users) ? req.body.users : []).map(Number).filter(id => get('SELECT 1 FROM users WHERE id = ?', id));
+    run(`UPDATE api_tokens SET users = ? WHERE id = ? AND kind = 'display'`, JSON.stringify(users), +req.params.id);
+    audit(req, 'display.people', users.length ? users.join(',') : 'household'); return { ok: true };
+  });
   app.delete('/api/admin/displays/:id', async req => { admin(req); run(`DELETE FROM api_tokens WHERE id = ? AND kind = 'display'`, +req.params.id); audit(req, 'display.delete'); return { ok: true }; });
 
   // ----- Home Assistant / menu bar (Bearer API token) -----
