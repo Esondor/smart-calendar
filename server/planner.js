@@ -81,8 +81,10 @@ export function workUnits(uid, now = Date.now(), horizonDays = 62) {
     if (t.wait_event && !(t.wait_until && t.wait_until <= now)) continue;   // follow-up still waiting for its event
     if (!t.recur) {
       if (assigneeOf(t) !== uid) continue;
-      units.push({ t, period: null, key: keyOf(t.id), spent: t.spent, earliest: Math.max(t.start_after ? dayStart(t.start_after) : 0, t.wait_until || 0),
-        deadline: t.deadline ? dayStart(addDays(t.deadline, 1)) : (r.p_target ? dayStart(addDays(r.p_target, 1)) : null), hardDeadline: !!t.deadline, ordered: ordered.get(r.project_id), rank: ranks.get(r.project_id)?.get(t.id) });
+      // start and due can carry a time of day (meta.from / meta.due, ms; their dates stay in start_after / deadline)
+      const due = t.deadline && +t.meta.due && isoDate(+t.meta.due) === t.deadline ? +t.meta.due : null;
+      units.push({ t, period: null, key: keyOf(t.id), spent: t.spent, earliest: Math.max(t.start_after ? dayStart(t.start_after) : 0, t.start_after && +t.meta.from && isoDate(+t.meta.from) === t.start_after ? +t.meta.from : 0, t.wait_until || 0),
+        deadline: due || (t.deadline ? dayStart(addDays(t.deadline, 1)) : (r.p_target ? dayStart(addDays(r.p_target, 1)) : null)), hardDeadline: !!t.deadline, ordered: ordered.get(r.project_id), rank: ranks.get(r.project_id)?.get(t.id) });
       continue;
     }
     const rc = { ...t.recur, anchor: t.recur.anchor || isoDate(t.created_at) };

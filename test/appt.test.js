@@ -63,3 +63,15 @@ test('due today with its hours over: it goes in this evening before bedtime, not
   const b2 = planUser(v, at15).blocks.find(x => x.key === String(id2));
   assert.notEqual(new Date(b2.s).toLocaleDateString('sv'), day);
 });
+
+test('start and due with a time of day: planned after the start, done by the due time', () => {
+  const v = createUser({ username: 'late2', name: 'L', password: 'long password 123' });
+  const st = settingsOf(v), all24 = Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map(d => [d, ['00:00', '24:00']]));
+  st.hours = { work: all24, personal: all24 }; st.fixed = []; saveSettings(v, st);
+  const day = new Date(now + D).toLocaleDateString('sv'), from = new Date(day + 'T14:00').getTime(), due = new Date(day + 'T16:00').getTime();
+  const id = createFlexible(v, { title: 'Pick up parcel', minutes: 30, schedule: 'personal', fromAt: from, dueAt: due });
+  const t = get('SELECT * FROM tasks WHERE id = ?', id);
+  assert.equal(t.start_after, day); assert.equal(t.deadline, day);
+  const b = planUser(v, now).blocks.find(x => x.key === String(id));
+  assert.ok(b.s >= from && b.e <= due, `${new Date(b.s)} – ${new Date(b.e)}`);
+});

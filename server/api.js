@@ -404,7 +404,7 @@ export default async function apiRoutes(app) {
   app.get('/api/travel', async req => { try { return (await maps.travel(req.user.id, String(req.query.to || '').trim())) || {}; } catch (x) { throw httpErr(x.statusCode || 502, x.message); } });
   app.post('/api/flexible', async req => {
     const b = req.body || {};
-    try { return { id: createFlexible(req.user.id, { title: str(b.title, 300), minutes: int(b.minutes, 30), win: b.win && winOf(b.win), calendarId: int(b.calendar_id, 0) || null, startAfter: b.start_after, location: b.location, notes: b.notes, travel: int(b.travel, 0), deadline: b.deadline || null, priority: int(b.priority, 2), schedule: b.schedule || null }) }; }
+    try { return { id: createFlexible(req.user.id, { title: str(b.title, 300), minutes: int(b.minutes, 30), win: b.win && winOf(b.win), calendarId: int(b.calendar_id, 0) || null, startAfter: b.start_after, location: b.location, notes: b.notes, travel: int(b.travel, 0), deadline: b.deadline || null, priority: int(b.priority, 2), schedule: b.schedule || null, fromAt: int(b.from_at, 0) || null, dueAt: int(b.due_at, 0) || null }) }; }
     catch (x) { throw httpErr(400, x.message); }
   });
   app.post('/api/events/:id/to-task', async req => {

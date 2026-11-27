@@ -1077,3 +1077,20 @@ aside.files .fhead b{white-space:nowrap}
 .seg.wide{display:flex}.seg.wide button{flex:1}
 .appt .rise{font-size:12px;color:var(--muted);padding-top:0}
 .appt .rise i{display:inline-block;width:44px;height:6px;border-radius:3px}
+
+/* a switch between two choices: the knob slides from the left one to the right one */
+.sw2{position:relative;display:inline-grid;grid-template-columns:1fr 1fr;padding:3px;border-radius:999px;background:var(--fill);border:0;min-width:200px;cursor:pointer;font:inherit}
+.sw2::before{content:"";position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 3px);border-radius:999px;background:var(--acc);box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .22s cubic-bezier(.3,.7,.3,1)}
+.sw2.r::before{transform:translateX(100%)}
+.sw2 span{position:relative;z-index:1;padding:6px 14px;text-align:center;font-size:13px;font-weight:600;color:var(--muted);transition:color .2s}
+.sw2:not(.r) span:first-child,.sw2.r span:last-child{color:#fff}
+.appt .sw2{width:100%}
+.appt .cell .sw2{width:auto;min-width:180px}
+/* start and end / due side by side */
+.appt .cell.two{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
+.appt .cell.two .lbl{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.appt .dt{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.appt .dt input[type=date]{min-width:0;flex:1 1 120px}
+.stepper{display:inline-flex;align-items:center;gap:10px}
+.stepper button{width:30px;height:30px;border-radius:50%;border:0;background:var(--fill);color:var(--ink);font-size:18px;line-height:1;cursor:pointer;padding:0}
+.stepper b{min-width:64px;text-align:center;font-weight:600}
