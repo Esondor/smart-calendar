@@ -4,6 +4,7 @@
 import { isoDate, addDays, wd, tm, at, dayStart, WINDOWS } from './time.js';
 
 const ranges = v => !v ? [] : Array.isArray(v[0]) ? v : [v];   // ['09:00','17:00'] or [['07:00','08:00'],['18:00','22:00']]
+const mergeR = L => L.sort((a, b) => a[0] - b[0]).reduce((o, r) => { const l = o[o.length - 1]; if (l && r[0] <= l[1]) l[1] = Math.max(l[1], r[1]); else o.push([...r]); return o; }, []);
 
 // Where an appointment goes inside its window (e.g. a practice open 08:00–11:00): right next to another appointment
 // if one touches the window (one trip, no gap), otherwise about an hour before closing, not first thing in the morning.
@@ -134,8 +135,9 @@ export function schedule({ now, horizonDays = 62, hours, chunk = 30, busy = [], 
   };
   let windowsOf = (it, date, strict) => {
     if (it.win) return it.win.days.includes(wd(date)) ? [[at(date, tm(it.win.s)), at(date, tm(it.win.e))]] : [];
-    const w = (hours[it.schedule] || hours.work || {})[wd(date)];
-    let fr = ranges(w).map(([a, b]) => [tm(a), tm(b)]);
+    // "all": all your hours together (work and personal …), merged, so never at night
+    let fr = it.schedule === 'all' ? mergeR(Object.values(hours).flatMap(h => ranges((h || {})[wd(date)]).map(([a, b]) => [tm(a), tm(b)])))
+      : ranges((hours[it.schedule] || hours.work || {})[wd(date)]).map(([a, b]) => [tm(a), tm(b)]);
     if (strict && it.window && it.window !== 'any') { const [ws, we] = WINDOWS[it.window] || WINDOWS.any; fr = fr.map(([a, b]) => [Math.max(a, ws), Math.min(b, we)]).filter(([a, b]) => b > a); }
     return fr.map(([a, b]) => [at(date, a), at(date, b)]);
   };

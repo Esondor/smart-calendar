@@ -75,3 +75,15 @@ test('start and due with a time of day: planned after the start, done by the due
   const b = planUser(v, now).blocks.find(x => x.key === String(id));
   assert.ok(b.s >= from && b.e <= due, `${new Date(b.s)} – ${new Date(b.e)}`);
 });
+
+test('"All day": all your hours together, never at night', () => {
+  const v = createUser({ username: 'allday', name: 'A', password: 'long password 123' });
+  const st = settingsOf(v), w = Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map(d => [d, ['09:00', '12:00']])), pr = Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map(d => [d, ['18:00', '20:00']]));
+  st.hours = { work: w, personal: pr }; st.fixed = []; saveSettings(v, st);
+  const day = new Date(now + D).toLocaleDateString('sv'), t0 = new Date(day + 'T00:00').getTime();
+  const id = createFlexible(v, { title: 'Long one', minutes: 300, schedule: 'all', startAfter: day });
+  const mine = planUser(v, t0).blocks.filter(x => x.key === String(id) && new Date(x.s).toLocaleDateString('sv') === day);
+  const h = ms => new Date(ms).getHours() + new Date(ms).getMinutes() / 60;
+  assert.equal(mine.reduce((m, x) => m + (x.e - x.s), 0) / 60000, 300, 'both sets of hours on one day');
+  assert.ok(mine.every(x => (h(x.s) >= 9 && h(x.e) <= 12) || (h(x.s) >= 18 && h(x.e) <= 20)), 'only in your hours');
+});

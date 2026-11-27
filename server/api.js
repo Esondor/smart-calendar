@@ -371,7 +371,7 @@ export default async function apiRoutes(app) {
   app.put('/api/events/:id/rule', async req => {
     const e = ownEvent(req.user.id, req.params.id), b = req.body || {}, series = e.series || e.ext_id, cur = ruleOf(req.user.id, e.calendar_id, series);
     const next = { ...cur };
-    if ('hours' in b) { next.hours = b.hours ? String(b.hours) : null; if (next.hours && !settingsOf(req.user.id).hours[next.hours]) throw httpErr(400, 'No such hours'); }
+    if ('hours' in b) { next.hours = b.hours ? String(b.hours) : null; if (next.hours && next.hours !== 'all' && !settingsOf(req.user.id).hours[next.hours]) throw httpErr(400, 'No such hours'); }
     if ('win' in b) {
       const w = b.win;
       if (!w) next.win = null;

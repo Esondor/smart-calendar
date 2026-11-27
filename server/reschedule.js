@@ -18,7 +18,7 @@ export const rulesOf = uid => new Map(all('SELECT calendar_id, series, hours, wi
 // the windows of one day an event may be placed in: its own window (e.g. Mon–Fri 08:00–11:00), an hours set, or work + personal
 function windowsOn(s, set, date, win) {
   if (win) return win.days.includes(wd(date)) && tm(win.e) > tm(win.s) ? [[at(date, tm(win.s)), at(date, tm(win.e))]] : [];
-  const names = set && s.hours[set] ? [set] : ['work', 'personal'];
+  const names = set && s.hours[set] ? [set] : set === 'all' ? Object.keys(s.hours) : ['work', 'personal'];
   const out = names.flatMap(n => ranges(s.hours[n]?.[wd(date)]).map(([a, b]) => [at(date, tm(a)), at(date, tm(b))]));
   out.sort((a, b) => a[0] - b[0]);
   const merged = [];   // work 09–18 and personal 18:30–21:30 stay apart; overlapping sets join

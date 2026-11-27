@@ -1,11 +1,10 @@
 import { html, useState, S, api, post, patch, del, load, toast, openModal, confirmDialog, when, dh, DN, PRI, projectById, SH, n24, priColor, fromIso, isoDate, hm } from './lib.js';
 import { I } from './icons.js';
 import { moveDialog } from './now.js';
-import { PlaceInput, googleCals, Switch2, atTime } from './eventsheet.js';
+import { PlaceInput, googleCals, SwitchN, hoursOpts, atTime } from './eventsheet.js';
 let LOCS = null;
 
 const DURS = [15, 30, 45, 60, 90, 120, 180];
-const scheduleNames = () => Object.keys(S.state.settings?.hours || { work: 1, personal: 1 });
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
 export async function openTask(idOrNew, opts = {}) {
@@ -73,9 +72,7 @@ function Editor({ task, opts, close }) {
       <label class="cell"><span>Certain time window</span><input type="checkbox" checked=${f.win} onChange=${e => set({ win: e.target.checked, meta: { ...(f.meta || {}), win: e.target.checked ? f.meta?.win || { days: [1, 2, 3, 4, 5], s: '08:00', e: '11:00' } : null } })}/></label>
       ${f.win && f.meta?.win ? html`<div class="cell"><span>Between</span><span class="row" style="gap:6px;flex:none">${['s', 'e'].map((k, n) => html`${n ? '–' : ''}<input class="t24" value=${f.meta.win[k]} onChange=${e => set({ meta: { ...f.meta, win: { ...f.meta.win, [k]: n24(e.target.value) || f.meta.win[k] } } })}/>`)}</span></div>
         <div class="cell"><div class="seg days">${[1, 2, 3, 4, 5, 6, 0].map(d => html`<button type="button" class=${f.meta.win.days.includes(d) ? 'on' : ''} onClick=${() => set({ meta: { ...f.meta, win: { ...f.meta.win, days: f.meta.win.days.includes(d) ? f.meta.win.days.filter(x => x !== d) : [...f.meta.win.days, d] } } })}>${DN[d].slice(0, 2)}</button>`)}</div></div>`
-      : (() => { const names = scheduleNames(), cur = f.schedule || proj?.schedule || 'work';
-          return html`<div class="cell"><span>In</span>${names.length === 2 ? html`<${Switch2} a=${cap(names[0])} b=${cap(names[1])} right=${cur === names[1]} set=${v => set({ schedule: names[v ? 1 : 0] })}/>`
-            : html`<div class="seg ch">${names.map(n => html`<button type="button" class=${cur === n ? 'on' : ''} onClick=${() => set({ schedule: n })}>${cap(n)}</button>`)}</div>`}</div>`; })()}
+      : html`<div class="cell"><span>In</span><${SwitchN} opts=${hoursOpts()} value=${f.schedule || proj?.schedule || 'work'} set=${v => set({ schedule: v })}/></div>`}
       ${(() => { const ord = proj && (proj.meta?.ordered ?? proj.kind === 'outline');
         return html`<div class="cell ncell"><span>Priority</span><div class="seg ch pri">${[3, 2, 1, 0].map(i => html`<button type="button" class=${+f.priority === i ? 'on' : ''} style=${+f.priority === i ? { background: priColor(i), color: '#fff' } : null} onClick=${() => set({ priority: i })}>${PRI[i]}</button>`)}</div></div>
         ${f.deadline && +f.priority > 0 && !ord && html`<div class="cell rise"><span></span><span class="row" style="gap:6px"><i style=${{ background: `linear-gradient(90deg,${priColor(+f.priority)},${priColor(0)})` }}></i>ASAP by ${DN[new Date(fromIso(f.deadline)).getDay()]} ${SH(fromIso(f.deadline))}${f.dt ? ', ' + f.dt : ''}</span></div>`}`; })()}

@@ -182,6 +182,11 @@ export async function openEventSheet(ev) {
 // that is only where it starts: as the due date comes near it rises by itself.
 const PRIS = [[3, 'Low'], [2, 'Medium'], [1, 'High'], [0, 'ASAP']];
 // two choices: a switch that slides from the left one to the right one
+// several choices in one: the knob slides to the one picked
+export const SwitchN = ({ opts, value, set }) => { const i = Math.max(0, opts.findIndex(([v]) => v === value));
+  return html`<div class="swn" style=${{ '--n': opts.length, '--i': i }}>${opts.map(([v, l], k) => html`<button type="button" class=${k === i ? 'on' : ''} onClick=${() => set(v)}>${l}</button>`)}</div>`; };
+// your hours to plan in: each set of hours, or all of them together ("All day": never at night)
+export const hoursOpts = () => [...Object.keys(S.state.settings?.hours || { work: 1, personal: 1 }).map(n => [n, cap(n)]), ['all', 'All day']];
 export const Switch2 = ({ a, b, right, set }) => html`<button type="button" class=${'sw2' + (right ? ' r' : '')} onClick=${() => set(!right)}><span>${a}</span><span>${b}</span></button>`;
 export const DateTime = ({ d, t, setD, setT, empty }) => html`<div class="dt"><input type="date" value=${d} onInput=${e => setD(e.target.value)}/>${!empty && html`<input class="t24" value=${t} placeholder="--:--" onChange=${e => setT(n24(e.target.value) || '')}/>`}</div>`;
 export async function newAppointment(at = null) {
@@ -212,8 +217,7 @@ export async function newAppointment(at = null) {
           <label class="cell"><span>Certain time window</span><input type="checkbox" checked=${f.win} onChange=${x => set({ win: x.target.checked })}/></label>
           ${f.win ? html`<div class="cell"><span>Between</span><span class="row" style="gap:6px;flex:none"><input class="t24" value=${f.ws} onChange=${x => set({ ws: n24(x.target.value) || f.ws })}/>–<input class="t24" value=${f.we} onChange=${x => set({ we: n24(x.target.value) || f.we })}/></span></div>
             <div class="cell"><div class="seg days">${WD.map(([d, l]) => html`<button type="button" class=${f.days.includes(d) ? 'on' : ''} onClick=${() => set({ days: f.days.includes(d) ? f.days.filter(x => x !== d) : [...f.days, d] })}>${l}</button>`)}</div></div>`
-          : html`<div class="cell"><span>In</span>${names.length === 2 ? html`<${Switch2} a=${cap(names[0])} b=${cap(names[1])} right=${f.when === names[1]} set=${v => set({ when: names[v ? 1 : 0] })}/>`
-            : html`<div class="seg ch">${names.map(n => html`<button type="button" class=${f.when === n ? 'on' : ''} onClick=${() => set({ when: n })}>${cap(n)}</button>`)}</div>`}</div>`}
+          : html`<div class="cell"><span>In</span><${SwitchN} opts=${hoursOpts()} value=${f.when} set=${v => set({ when: v })}/></div>`}
           <div class="cell ncell"><span>Priority</span><div class="seg ch pri">${PRIS.map(([i, l]) => html`<button type="button" class=${f.priority === i ? 'on' : ''} style=${f.priority === i ? { background: priColor(i), color: '#fff' } : null} onClick=${() => set({ priority: i })}>${l}</button>`)}</div></div>
           ${f.dd && f.priority > 0 && html`<div class="cell rise"><span></span><span class="row" style="gap:6px"><i style=${{ background: `linear-gradient(90deg,${priColor(f.priority)},${priColor(0)})` }}></i>ASAP by ${DN[new Date(fromIso(f.dd)).getDay()]} ${SH(fromIso(f.dd))}${f.dt ? ', ' + f.dt : ''}</span></div>`}`}
         ${cals.length > 0 && html`<div class="cell"><span>Calendar</span><select value=${f.cal} onChange=${x => set({ cal: x.target.value })}>${plan && html`<option value="">Plan calendar</option>`}${cals.map(c => html`<option value=${c.id}>${c.name}</option>`)}</select></div>`}
