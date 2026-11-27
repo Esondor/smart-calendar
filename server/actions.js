@@ -164,6 +164,16 @@ export function fixedOnDay(uid, fid, date, { start, end, title, remove = false }
   markDirty(uid);
   return id;
 }
+// a logged session moved or resized in the calendar: its minutes follow, and its entry in Google (a kept block) is cut anew
+export function moveSession(uid, id, start, end) {
+  const w = get('SELECT * FROM work_log WHERE id = ? AND user_id = ?', id, uid); if (!w) return false;
+  run('UPDATE work_log SET start = ?, end = ? WHERE id = ?', start, end, id);
+  const t = taskById(w.task_id);
+  if (t && !t.recur) run('UPDATE tasks SET spent = MAX(0, spent + ?) WHERE id = ?', ((end - start) - (w.end - w.start)) / 60000, w.task_id);
+  run('UPDATE plan_events SET kept = 0, start = ?, end = ? WHERE user_id = ? AND task_id = ? AND kept = 1 AND start < ? AND end > ?', Math.min(start, w.start), Math.max(end, w.end), uid, w.task_id, w.end, w.start);
+  markDirty(uid); notifyUsers([uid], 'timer');
+  return true;
+}
 export function breakNow(uid, minutes, title) {
   const now = Date.now(); stopTimer(uid);
   addAppt(uid, now, now + minutes * 60000, title, 'break');

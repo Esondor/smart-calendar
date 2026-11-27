@@ -431,9 +431,11 @@ export async function deleteEvent(uid, ev, scope = 'one') {
   await api(acc, 'DELETE', evPath(cal, id), null, { sendUpdates: 'none' }).catch(e => { if (e.status !== 404 && e.status !== 410) throw e; });
   if (id === ev.series) run('DELETE FROM events WHERE calendar_id = ? AND series = ?', cal.id, ev.series); else run('DELETE FROM events WHERE id = ?', ev.id);
 }
-export async function createEvent(uid, calId, { title, start, end, all_day, location, descr, dup }) {
+// free: shown as Free (does not block); not given: Busy, an all-day event Free (Google's own default)
+export async function createEvent(uid, calId, { title, start, end, all_day, location, descr, dup, free = null }) {
   const { cal, acc } = writableCal(uid, calId);
   const e = await api(acc, 'POST', `/calendars/${encodeURIComponent(cal.ext_id)}/events`, { summary: String(title || 'New Event').slice(0, 300), start: gTime(start, all_day), end: gTime(all_day ? Math.max(end, start + 864e5) : end, all_day),
+    transparency: (free ?? !!all_day) ? 'transparent' : 'opaque',
     ...(location ? { location: String(location).slice(0, 500) } : {}), ...(descr ? { description: String(descr).slice(0, 4000) } : {}), ...(dup ? { extendedProperties: { shared: { scdup: dup } } } : {}) });
   await refresh(acc, cal, start, end);
   return e.id;

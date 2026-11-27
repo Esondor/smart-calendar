@@ -184,7 +184,7 @@ export async function newAppointment(at = null) {
   const cals = googleCals(), names = Object.keys(S.state.settings?.hours || { work: 1, personal: 1 });
   const t0 = at || Math.ceil(Date.now() / 900000) * 900000;
   const r = await openModal(close => { const B = () => {
-    const [f, setF] = useState({ title: '', mode: cals.length ? 'time' : 'plan', day: isoDate(t0), s: hm(t0), e: hm(t0 + 3600e3), all_day: false,
+    const [f, setF] = useState({ title: '', mode: cals.length ? 'time' : 'plan', day: isoDate(t0), s: hm(t0), e: hm(t0 + 3600e3), all_day: false, block: false,
       minutes: 30, other: false, when: names.includes('personal') ? 'personal' : names[0], days: [1, 2, 3, 4, 5], ws: '08:00', we: '11:00',
       from: isoDate(t0), until: '', priority: 2, cal: cals.length ? String((cals.find(c => c.use_busy) || cals[0]).id) : '', location: '', travel: 0, notes: '', more: false });
     const set = x => setF({ ...f, ...x }), plan = f.mode === 'plan';
@@ -195,7 +195,8 @@ export async function newAppointment(at = null) {
         ${!plan ? html`
           <div class="cell"><span>Day</span><input type="date" value=${f.day} onInput=${e => set({ day: e.target.value })}/></div>
           <div class="cell"><span>Time</span><span class="row" style="gap:6px;flex:none">${!f.all_day && html`<input class="t24" value=${f.s} onChange=${e => set({ s: n24(e.target.value) || f.s })}/>–<input class="t24" value=${f.e} onChange=${e => set({ e: n24(e.target.value) || f.e })}/>`}
-            <button type="button" class=${'ghost' + (f.all_day ? ' on' : '')} onClick=${() => set({ all_day: !f.all_day })}>All day</button></span></div>`
+            <button type="button" class=${'ghost' + (f.all_day ? ' on' : '')} onClick=${() => set({ all_day: !f.all_day })}>All day</button></span></div>
+          ${f.all_day && html`<label class="cell"><span>Blocks time</span><input type="checkbox" checked=${f.block} onChange=${e => set({ block: e.target.checked })}/></label>`}`
         : html`
           <div class="cell ncell"><span>Takes</span><div class="seg ch">${DUR.map(m => html`<button type="button" class=${!f.other && f.minutes === m ? 'on' : ''} onClick=${() => set({ minutes: m, other: false })}>${m < 60 ? m + 'm' : m / 60 + 'h'}</button>`)}<button type="button" class=${f.other ? 'on' : ''} onClick=${() => set({ other: true })}>…</button></div></div>
           ${f.other && html`<div class="cell"><span>Minutes</span><input type="number" min="5" step="5" style="width:90px" value=${f.minutes} onInput=${e => set({ minutes: Math.max(0, +e.target.value || 0) })}/></div>`}
@@ -215,7 +216,7 @@ export async function newAppointment(at = null) {
   try {
     if (r.mode === 'time') {
       const base = fromIso(r.day);
-      await post('/api/events', { calendar_id: +r.cal, title: r.title.trim(), all_day: r.all_day, start: r.all_day ? base : atTime(r.day, r.s), end: r.all_day ? addDays(base, 1) : atTime(r.day, r.e), location: r.location.trim() || null, notes: r.notes.trim() || null });
+      await post('/api/events', { calendar_id: +r.cal, title: r.title.trim(), all_day: r.all_day, start: r.all_day ? base : atTime(r.day, r.s), end: r.all_day ? addDays(base, 1) : atTime(r.day, r.e), location: r.location.trim() || null, notes: r.notes.trim() || null, free: r.all_day ? !r.block : false });
       await load(['plan']);
     } else {
       await post('/api/flexible', { title: r.title.trim(), minutes: r.minutes, win: r.when === 'window' ? { days: r.days, s: r.ws, e: r.we } : null, schedule: r.when === 'window' ? null : r.when,

@@ -42,7 +42,10 @@ function Legend({ plan }) {
   const cals = new Map();
   for (const e of plan.events || []) if (e.color && !cals.has(e.cal)) cals.set(e.cal, e.color);
   const byId = new Map((S.state.accounts || []).flatMap(a => a.calendars || []).map(c => [+c.id, c]));
-  for (const u of Object.values(plan.units || {})) { const c = byId.get(+u.meta?.calendarId); if (c?.color && !cals.has(c.name)) cals.set(c.name, c.color); }
+  for (const u of Object.values(plan.units || {})) {
+    const c = byId.get(+u.meta?.calendarId); if (c?.color && !cals.has(c.name)) cals.set(c.name, c.color);
+    if (u.ordered && u.p_color && !cals.has(u.p_name)) cals.set(u.p_name, u.p_color);   // an ordered project shows in its own color
+  }
   return html`<div class="legend"><span class="lg"><span>Low</span><i class="pgrad"></i><span>ASAP</span></span>
     ${[...cals].sort((a, b) => a[0].localeCompare(b[0])).map(([n, c]) => html`<span class="lg" key=${n}><i style=${{ background: c }}></i>${n}</span>`)}</div>`;
 }
@@ -167,22 +170,20 @@ export default function CalendarView() {
     el.addEventListener('touchend', end, { passive: true }); el.addEventListener('touchcancel', end, { passive: true });
     return () => { el.removeEventListener('touchstart', start); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', end); el.removeEventListener('touchcancel', end); };
   }, [month, mobile, zoom, hh, focus, cw, from]);
-  // desktop trackpad: a sideways swipe turns one page, like the arrow buttons; the momentum after it is used up, not scrolled.
-  // A new swipe while the last one still coasts (its speed going up again) turns the next page.
+  // desktop trackpad: scrolling sideways moves freely; a quick swipe turns one page, like the arrow buttons, and the
+  // momentum after it is used up, not scrolled. A new quick swipe while the last one still coasts turns the next page.
   const stepRef = useRef(); stepRef.current = k => step(k);
   useEffect(() => {
     const el = sc.current; if (!el || month || guard) return;
-    let acc = 0, last = 0, fired = 0, prev = 0;
+    let t0 = 0, last = 0, fired = 0, prev = 0;
     const wheel = e => {
       const dx = e.deltaX || (e.shiftKey ? e.deltaY : 0);
       if (!dx || Math.abs(dx) < Math.abs(e.deltaY) && !e.shiftKey) return;
-      e.preventDefault();
       const t = e.timeStamp, a = Math.abs(dx);
-      if (t - last > 180 || (fired && t - fired > 350 && a > 15 && a > prev * 1.6)) { acc = 0; fired = 0; }   // a new swipe
+      if (t - last > 180 || (fired && t - fired > 350 && a > 15 && a > prev * 1.6)) { t0 = t; fired = 0; }   // a new gesture
       last = t; prev = a;
-      if (fired) return;
-      acc += dx;
-      if (Math.abs(acc) > 30) { fired = t; stepRef.current(acc > 0 ? 1 : -1); }
+      if (fired) { e.preventDefault(); return; }
+      if (a >= 40 && t - t0 < 150) { e.preventDefault(); fired = t; stepRef.current(dx > 0 ? 1 : -1); }   // quick: one page
     };
     el.addEventListener('wheel', wheel, { passive: false });
     return () => el.removeEventListener('wheel', wheel);
@@ -229,7 +230,8 @@ export default function CalendarView() {
     const d1 = addDays(d0, 1), out = [], allDay = [], mini = [];
     if (!plan) return { out, allDay, mini };
     plan.events.filter(e => e.end + e.after * 60000 > d0 && e.start - e.before * 60000 < d1).forEach(e => {
-      if (e.all_day || e.end - e.start >= 864e5) { if (e.end > d0 && e.start < d1) allDay.push({ t: e.title, cal: e.cal, free: !e.blocks, color: e.color, ev: e }); return; }
+      // all day: with non-blocking events minimised, one that is not for you (the calendar's filter) or hidden is left out
+      if (e.all_day || e.end - e.start >= 864e5) { if (collapse && (e.hidden || !e.mine)) return; if (e.end > d0 && e.start < d1) allDay.push({ t: e.title, cal: e.cal, free: !e.blocks, color: e.color, ev: e }); return; }
       const x = { kind: 'event', ev: e, s: Math.max(e.start - e.before * 60000, d0), e: Math.min(e.end + e.after * 60000, d1), s0: Math.max(e.start, d0), e0: Math.min(e.end, d1), t: e.title, cal: e.cal, free: !e.blocks, color: e.color };
       (collapse && (!e.blocks || e.hidden) ? mini : out).push(x);
     });
@@ -238,7 +240,7 @@ export default function CalendarView() {
       .filter(b => b.e > d0 && b.s < d1).forEach(b => { const u = plan.units[b.key]; if (u) out.push({ kind: 'block', s: b.s, e: b.e, b, u }); });
     // done and tracked: kept as it happened (timer sessions; a task ticked off without one, as the quarter hour before)
     const log = plan.log || [];
-    log.filter(l => l.end > d0 && l.start < d1).forEach(l => out.push({ kind: 'past', s: Math.max(l.start, d0), e: Math.min(l.end, d1), s1: l.start, e1: l.end, t: l.title || 'Session', c: l.color, p: l.p_name, done: !!l.done, task: l.task_id, research: l.kind === 'research' }));
+    log.filter(l => l.end > d0 && l.start < d1).forEach(l => out.push({ kind: 'past', s: Math.max(l.start, d0), e: Math.min(l.end, d1), s1: l.start, e1: l.end, t: l.title || 'Session', c: l.color, p: l.p_name, done: !!l.done, task: l.task_id, research: l.kind === 'research', id: l.id }));
     (plan.done || []).filter(x => x.at >= d0 && x.at < d1 && !log.some(l => l.task_id === x.id && l.start <= x.at + 300000 && l.end >= x.at - 300000))
       .forEach(x => out.push({ kind: 'past', s: Math.max(d0, x.at - 900000), e: x.at, s1: x.at, e1: x.at, t: x.title, c: x.color, done: true, task: x.id, tick: true }));
     return { out: lanes(out.filter(x => !x.nolane)).concat(out.filter(x => x.nolane)), allDay, mini };
@@ -315,10 +317,10 @@ export default function CalendarView() {
   async function onUp() {
     listen(false);
     const g = drag.current; drag.current = null; if (!g) return;
-    const isEv = g.it.kind === 'event', isBusy = g.it.kind === 'busy';
-    if (g.tap) return who !== st.me.id ? (isEv || isBusy ? null : openTask(g.it.u.taskId)) : isEv && !g.it.ev.editable ? eventSheet(g.it.ev) : setSel(selKey(g.it));
+    const isEv = g.it.kind === 'event', isBusy = g.it.kind === 'busy', isLog = g.it.kind === 'log';
+    if (g.tap) return who !== st.me.id ? (isEv || isBusy || isLog ? null : openTask(g.it.u.taskId)) : isEv && !g.it.ev.editable ? eventSheet(g.it.ev) : setSel(selKey(g.it));
     const el = elOf(g);
-    if (!g.moved) { unpaint(el); setSel(null); return isEv ? eventSheet(g.it.ev) : isBusy ? busySheet(g.it.bu) : blockSheet(g.it); }
+    if (!g.moved) { unpaint(el); setSel(null); return isEv ? eventSheet(g.it.ev) : isBusy ? busySheet(g.it.bu) : isLog ? openTask(g.it.task) : blockSheet(g.it); }
     const k = g.mode === 'move' ? g.dm * 60000 + g.dd * 864e5 : g.dm * 60000;
     if (!k) return unpaint(el);
     const s = g.mode === 'end' ? g.it.s : g.it.s + k, e = g.mode === 'start' ? g.it.e : g.it.e + k;
@@ -330,6 +332,7 @@ export default function CalendarView() {
       return unpaint(elOf(g));
     }
     if (isBusy) { setSel(null); await saveBusy(g.it.bu, { s, e }); return unpaint(elOf(g)); }
+    if (isLog) { setSel(null); try { await patch('/api/worklog/' + g.it.id, { start: s, end: e }); await load(['plan', 'tasks']); } catch (err) { toast(err.message); } return unpaint(elOf(g)); }
     unpaint(el); place(g.it, s, e);
   }
   // a break, blocked time or one day of a fixed break (Lunch, …): moved, changed or removed here; a fixed one only on that day
@@ -381,12 +384,16 @@ export default function CalendarView() {
       ${out.map(x => {
         const style = { top: top(x.s) + 'px', height: Math.max(14, (x.e - x.s) / 3600e3 * hh - 2) + 'px' };
         if (x.lanes > 1) { style.left = `calc(${100 * x.lane / x.lanes}% + 2px)`; style.width = `calc(${100 / x.lanes}% - 4px)`; style.right = 'auto'; }
-        if (x.kind === 'past') return html`<div class=${'ev past' + (x.done ? ' dn' : '')} style=${{ ...style, '--c': x.c || 'var(--done)' }} title=${`${x.t}${x.p ? '\n' + x.p : ''}\n${x.tick ? 'Done ' + hm(x.e1) : hm(x.s1) + '–' + hm(x.e1)}`} onClick=${x.task ? () => openTask(x.task) : null}>
-          <span class="et"><span class="kind">${I('check', 12)}</span>${x.research ? 'Research · ' : ''}${x.t}</span><span class="em">${x.tick ? 'Done ' + hm(x.e1) : `${hm(x.s1)}–${hm(x.e1)}`}${n === 1 && x.p ? ' · ' + x.p : ''}</span></div>`;
+        if (x.kind === 'past') { const it = x.id && { kind: 'log', id: x.id, task: x.task, s: x.s1, e: x.e1, b: { key: 'w' + x.id, s: x.s1 } };   // a logged session: drag it or its edges to correct it
+          return html`<div class=${'ev past' + (x.done ? ' dn' : '') + (it && sel === selKey(it) ? ' sel' : '')} style=${{ ...style, '--c': x.c || 'var(--done)' }} title=${`${x.t}${x.p ? '\n' + x.p : ''}\n${x.tick ? 'Done ' + hm(x.e1) : hm(x.s1) + '–' + hm(x.e1)}`}
+            data-k=${it ? selKey(it) : null} onPointerDown=${it ? e => onDown(e, it) : null} onClick=${!it && x.task ? () => openTask(x.task) : null}>
+          <span class="et"><span class="kind">${I('check', 12)}</span>${x.research ? 'Research · ' : ''}${x.t}</span><span class="em">${x.tick ? 'Done ' + hm(x.e1) : `${hm(x.s1)}–${hm(x.e1)}`}${n === 1 && x.p ? ' · ' + x.p : ''}</span>${it && html`<div class="rs rs-top"></div><div class="rs"></div>`}</div>`; }
         if (x.kind === 'block') { const cur = plan.active && plan.active.task_id === x.u.taskId, fit = Math.floor(((x.e - x.s) / 3600e3 * hh - 44) / 16), pts = n === 1 && fit > 0 ? partPoints(x.u.points, x.b.part, x.b.parts).slice(0, fit) : [];   // only as many points as fit
-          const ap = isAppt(x.u.meta), pc = priColor(x.u.pri ?? x.u.priority);   // a task in its priority's color; an appointment in its calendar's, the priority at its edge
-          return html`<div class=${'ev block' + (x.b.pinned ? ' pinned' : '') + (x.u.late ? ' late' : '') + (cur ? ' cur' : '') + (sel === selKey(x) ? ' sel' : '')} style=${{ ...style, background: ap ? x.u.p_color : pc, ...(ap ? { borderLeft: `4px solid ${pc}` } : {}) }}
-            data-k=${selKey(x)} onPointerDown=${e => onDown(e, x)} title=${`${x.u.title}\n${x.u.p_name}${x.u.late ? '\nAfter deadline' : ''}\nPriority ${['ASAP', 'High', 'Medium', 'Low'][Math.round(x.u.pri ?? x.u.priority)]}`}>
+          // a task in its priority's color; an appointment in its calendar's, the priority at its edge; an ordered project
+          // (a thesis, worked through in its order) in its own color, as its calendar
+          const ap = isAppt(x.u.meta), own = x.u.ordered, pc = priColor(x.u.pri ?? x.u.priority);
+          return html`<div class=${'ev block' + (x.b.pinned ? ' pinned' : '') + (x.u.late ? ' late' : '') + (cur ? ' cur' : '') + (sel === selKey(x) ? ' sel' : '')} style=${{ ...style, background: ap || own ? x.u.p_color : pc, ...(ap ? { borderLeft: `4px solid ${pc}` } : {}) }}
+            data-k=${selKey(x)} onPointerDown=${e => onDown(e, x)} title=${`${x.u.title}\n${x.u.p_name}${x.u.late ? '\nAfter deadline' : ''}${own ? '' : `\nPriority ${['ASAP', 'High', 'Medium', 'Low'][Math.round(x.u.pri ?? x.u.priority)]}`}`}>
             <span class="et">${isAppt(x.u.meta) ? html`<span class="kind">${I('flex', 12)}</span>` : ''}${x.u.title}</span><span class="em">${hm(x.s)}–${hm(x.e)}${x.b.parts > 1 ? ` · ${x.b.part}/${x.b.parts}` : ''}${n === 1 && x.u.p_name ? ' · ' + x.u.p_name : ''}</span>
             <div class="rs rs-top"></div>${pts.length > 0 && html`<ul class="epts">${pts.map(p => html`<li>${p.t}</li>`)}</ul>`}<div class="rs"></div></div>`; }
         if (x.kind === 'event') {

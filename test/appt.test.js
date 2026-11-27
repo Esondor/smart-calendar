@@ -37,3 +37,8 @@ test('a planned appointment: in personal hours, from a day, by an end date, with
   assert.ok(p.units[String(id)].pri < 2, 'its end date is close: higher than set');
   assert.equal(get('SELECT priority FROM tasks WHERE id = ?', createFlexible(u, { title: 'x', minutes: 30 })).priority, 2, 'Medium unless chosen');
 });
+
+test('an ordered project (a thesis) keeps its priority: it is worked through in its order', () => {
+  assert.equal(effPri(unit(3, 1, { ordered: true }), now), 3);
+  assert.equal(effPri(unit(3, 1), now) < 1, true, 'a normal task rises');
+});

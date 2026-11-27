@@ -444,3 +444,12 @@ test('a tracked appointment past its end: 30 min more in Google too; paused, it 
   assert.ok(Math.abs(Date.parse(store.get('appt1').end.dateTime) - back) <= 60000, 'paused: ends at its end, or now');
   store.delete('appt1'); run(`DELETE FROM events WHERE ext_id = 'appt1'`); run('DELETE FROM event_track WHERE user_id = ?', uid);
 });
+
+test('a new all-day appointment is Free unless it should block; a timed one is Busy', async () => {
+  const work = get(`SELECT * FROM calendars WHERE ext_id = 'work@x'`), d = new Date(Date.now() + 3 * 864e5); d.setHours(0, 0, 0, 0);
+  const a = await google.createEvent(uid, work.id, { title: 'Holiday', start: +d, end: +d + 864e5, all_day: true });
+  const b = await google.createEvent(uid, work.id, { title: 'Moving day', start: +d, end: +d + 864e5, all_day: true, free: false });
+  const c = await google.createEvent(uid, work.id, { title: 'Dentist', start: +d + 9 * 3600e3, end: +d + 10 * 3600e3 });
+  assert.equal(store.get(a).transparency, 'transparent'); assert.equal(store.get(b).transparency, 'opaque'); assert.equal(store.get(c).transparency, 'opaque');
+  for (const id of [a, b, c]) store.delete(id);
+});

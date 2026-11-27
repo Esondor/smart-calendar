@@ -43,3 +43,13 @@ test('a fixed break on one day: moved or left out there only; the plan uses it',
   assert.equal(planUser(u, now).busy.filter(b => b.t === 'Lunch' && isoDate(b.s) === isoDate(now + 3 * 864e5)).length, 1, 'other days unchanged');
   assert.ok(id);
 });
+
+test('a logged session moved in the calendar: its minutes follow', () => {
+  const t0 = Date.now() - 3 * 3600e3;
+  const tid2 = Number(run(`INSERT INTO tasks(project_id, title, duration, auto, created_by, assignee_id, created_at, updated_at, spent) VALUES (?, 'Logged', 60, 1, ?, ?, ?, ?, 30)`, pid, u, u, now, now).lastInsertRowid);
+  const id = Number(run(`INSERT INTO work_log(user_id, task_id, kind, start, end) VALUES (?, ?, 'work', ?, ?)`, u, tid2, t0, t0 + 30 * 60000).lastInsertRowid);
+  assert.ok(A.moveSession(u, id, t0 - 15 * 60000, t0 + 30 * 60000));
+  assert.equal(get('SELECT start FROM work_log WHERE id = ?', id).start, t0 - 15 * 60000);
+  assert.equal(get('SELECT spent FROM tasks WHERE id = ?', tid2).spent, 45);
+  assert.equal(A.moveSession(u + 99, id, t0, t0 + 60000), false, 'only your own');
+});

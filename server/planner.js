@@ -278,11 +278,12 @@ function applyProjectOrder(units, actKey) {
 
 // the priority it is planned with: its own, rising towards ASAP as its end date comes near (by the days to spare once
 // the work left is done, about 4 h of it a day): 3 weeks or more as set, a week → High at most, 2 days → ASAP. Overdue: ASAP.
-// Repeating tasks keep theirs (each round has an end). 0 = ASAP … 3 = Low, in steps of 0.1 (the color shows it).
+// Repeating tasks keep theirs (each round has an end), and so do ordered projects (a thesis: worked through in its order).
+// 0 = ASAP … 3 = Low, in steps of 0.1 (the color shows it). Close to ASAP, it may also take a loose break's place.
 export function effPri(u, now = Date.now()) {
   let p = Math.max(0, Math.min(3, +u.t.priority));
   if (u.overdue) p = 0;
-  else if (u.hardDeadline && u.period == null && u.deadline) {
+  else if (u.hardDeadline && u.period == null && u.deadline && !u.ordered) {
     const left = Math.max(0, (u.t.duration || 0) - (u.spent || 0)) / 60, slack = (u.deadline - now) / 864e5 - left / 4;
     p = Math.min(p, slack <= 0 ? 0 : slack < 2 ? slack / 2 : slack < 7 ? 1 + (slack - 2) / 5 : slack < 21 ? 2 + (slack - 7) / 14 : 3);
   }
@@ -343,7 +344,7 @@ export function planUser(uid, now = Date.now()) {
     const mine = ov.filter(o => o.task_id === u.t.id && o.period === (u.period || 0));
     const defer = Math.max(0, ...mine.filter(o => o.kind === 'defer').map(o => o.end));
     items.push({ key: u.key, remaining, minChunk: u.t.min_chunk, schedule: u.t.schedule || u.t.p_schedule || 'work', loc: u.t.location ? u.t.location.trim().toLowerCase() : null,
-      after: u.after || null, earliest: Math.max(u.earliest || 0, defer), deadline: u.deadline, days: u.t.recur?.days, window: u.t.recur?.window, win: winOf(u.t.meta?.win), pad: Math.max(0, Math.min(180, +u.t.meta?.travel || 0)), important: u.t.priority === 0,
+      after: u.after || null, earliest: Math.max(u.earliest || 0, defer), deadline: u.deadline, days: u.t.recur?.days, window: u.t.recur?.window, win: winOf(u.t.meta?.win), pad: Math.max(0, Math.min(180, +u.t.meta?.travel || 0)), important: (u.pri ?? u.t.priority) < 0.5,
       pins: mine.filter(o => o.kind === 'pin' && o.end > now).map(o => ({ s: o.start, e: o.end })) });
   }
   // ordered projects: a moved (pinned) task keeps its place in the order → everything before it should be finished by then

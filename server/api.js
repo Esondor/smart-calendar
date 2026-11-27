@@ -5,7 +5,7 @@ import { all, get, run, tx, J } from './db.js';
 import { encrypt } from './crypto.js';
 import { httpErr } from './auth.js';
 import { settingsOf, saveSettings, publicUser, allUsers, contactsOf, projectIdsFor, isMember, membersOf, projectRow, taskRow, taskById, canEditTask, logActivity } from './models.js';
-import { getPlan, markDirty, usersOfProject, parseKey, keyOf, assigneeOf, busyOf, shownBusy, calendarEvents, joinLink, eventRanker, winOf, missedStart, openEnd } from './planner.js';
+import { getPlan, markDirty, usersOfProject, parseKey, keyOf, assigneeOf, busyOf, shownBusy, calendarEvents, joinLink, eventRanker, winOf, missedStart, openEnd, wordsPass } from './planner.js';
 import * as A from './actions.js';
 import { bus, notifyUsers } from './bus.js';
 import * as google from './sync/google.js';
@@ -422,7 +422,7 @@ export default async function apiRoutes(app) {
   app.post('/api/events', async req => {
     const b = req.body || {}, start = int(b.start), end = int(b.end);
     if (!(end > start)) throw httpErr(400, 'End must be after start');
-    try { await google.createEvent(req.user.id, int(b.calendar_id), { title: str(b.title, 300), start, end, all_day: !!b.all_day, location: b.location ? str(b.location, 500) : null, descr: b.notes ? str(b.notes, 4000) : null }); } catch (x) { gerr(x); }
+    try { await google.createEvent(req.user.id, int(b.calendar_id), { title: str(b.title, 300), start, end, all_day: !!b.all_day, location: b.location ? str(b.location, 500) : null, descr: b.notes ? str(b.notes, 4000) : null, free: b.free == null ? null : !!b.free }); } catch (x) { gerr(x); }
     markDirty(req.user.id, true); return { ok: true };
   });
   // travel / blocked time before and after a calendar event; a recurring event shares it across the series
@@ -481,7 +481,7 @@ export default async function apiRoutes(app) {
     const evs = raw.map(e => { const r = rules.get(`${e.calendar_id}:${e.series || e.ext_id}`) || {}; return { id: e.id, location: e.location || null, join: joinLink(e),
       hours: r.hours || null, win: r.win || null, rankSet: r.rank || null, rank: rankOf(e), start: e.start, end: e.end, all_day: e.all_day, title: e.title, free: e.free, cal: e.cal, color: e.color,
       blocks: e.blocks, before: e.before, after: e.after, travel: e.travel ? { mode: e.travel.mode, min: e.travel.min, there: e.travel.there, home: e.travel.home } : null, pin: e.pin || null, custom: e.custom, forced: e.forced, recurring: e.recurring, editable: !!e.editable, calendar_id: e.calendar_id, ext_id: e.ext_id, hidden: hidden.has(e.id),
-      alsoIn: e.dup ? (also.get(e.dup + '@' + e.start) || []).filter(c => c.id !== e.calendar_id) : [], done: !!e.t_done,
+      alsoIn: e.dup ? (also.get(e.dup + '@' + e.start) || []).filter(c => c.id !== e.calendar_id) : [], done: !!e.t_done, mine: wordsPass(e, e.title),
       track: e.t_since || e.t_spent ? { since: e.t_since || null, spent: e.t_spent || 0 } : null }; });
     const moved = all('SELECT DISTINCT task_id, period, kind FROM overrides WHERE user_id = ? AND end > ?', uid, now);
     const doneT = all(`SELECT t.id, t.title, t.done_at AS at, p.color FROM tasks t JOIN projects p ON p.id = t.project_id JOIN project_members m ON m.project_id = p.id AND m.user_id = ?
@@ -517,7 +517,7 @@ export default async function apiRoutes(app) {
   function unitOut(u, i = {}) {
     const t = u.t;
     return { key: u.key, taskId: t.id, period: u.period, title: t.title, notes: t.notes, points: t.points, meta: t.meta, project_id: t.project_id, p_name: t.p_name, p_color: calColor(t.meta?.calendarId) || t.p_color,
-      priority: t.priority, pri: u.pri ?? t.priority, duration: t.duration, spent: u.spent, deadline: u.deadline, overdue: !!u.overdue, recur: !!t.recur, periodStart: u.periodStart, periodEnd: u.periodEnd,
+      priority: t.priority, pri: u.pri ?? t.priority, ordered: !!u.ordered, duration: t.duration, spent: u.spent, deadline: u.deadline, overdue: !!u.overdue, recur: !!t.recur, periodStart: u.periodStart, periodEnd: u.periodEnd,
       parent_id: t.parent_id, first: i.first || null, end: i.end || null, late: !!i.late, unplaced: i.unplaced || 0, auto: t.auto, ext_source: t.ext_source };
   }
 
@@ -542,6 +542,12 @@ export default async function apiRoutes(app) {
     if (!(s && e > s)) throw httpErr(400, 'End must be after start');
     const brk = b.kind === 'break';   // a break you schedule: shown like Lunch, not written to the calendar
     return { id: A.addAppt(req.user.id, s, e, str(b.title || (brk ? 'Break' : 'Blocked'), 120), brk ? 'break' : 'appt') };
+  });
+  app.patch('/api/worklog/:id', async req => {
+    const b = req.body || {}, s = int(b.start), e = int(b.end);
+    if (!(s && e > s && e <= Date.now() + 60000)) throw httpErr(400, 'Invalid time');
+    if (!A.moveSession(req.user.id, +req.params.id, s, e)) throw httpErr(404, 'Not found');
+    return { ok: true };
   });
   app.patch('/api/appts/:id', async req => {
     const b = req.body || {}, a = get(`SELECT * FROM appts WHERE id = ? AND user_id = ? AND kind != 'skipfixed'`, +req.params.id, req.user.id); if (!a) throw httpErr(404, 'Not found');

@@ -1064,3 +1064,9 @@ aside.files .fhead b{white-space:nowrap}
 .legend .lg{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
 .legend i{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
 .legend i.pgrad{width:44px;height:6px;border-radius:3px;background:linear-gradient(90deg,hsl(125 70% 42%),hsl(83 70% 42%),hsl(42 70% 42%),hsl(0 70% 42%))}
+/* breaks, blocked time and logged sessions: select, then drag / resize like events */
+.ev.fixed.sel,.ev.appt.sel,.ev.past.sel{touch-action:none;z-index:4;box-shadow:0 0 0 2px var(--panel),0 0 0 4px #fff,0 6px 18px rgba(0,0,0,.35)}
+.ev.fixed.sel .rs,.ev.appt.sel .rs,.ev.past.sel .rs{height:16px}
+.ev.fixed.sel .rs::after,.ev.appt.sel .rs::after,.ev.past.sel .rs::after{content:"";position:absolute;left:50%;bottom:4px;width:26px;height:4px;margin-left:-13px;border-radius:2px;background:var(--ink);opacity:.6}
+.ev.fixed.sel .rs-top::after,.ev.appt.sel .rs-top::after,.ev.past.sel .rs-top::after{bottom:auto;top:4px}
+.ev.fixed.drag,.ev.appt.drag,.ev.past.drag{opacity:.9;z-index:5}
