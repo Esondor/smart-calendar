@@ -127,6 +127,8 @@ function Hours() {
     <table style="width:100%"><tr><td></td>${names.map(n => html`<td class="hint" style="padding-bottom:6px">${cap(n)}${!['work', 'personal'].includes(n) ? html` <button class="icon" onClick=${() => { const h = { ...s.hours }; delete h[n]; putSettings({ hours: h }); }}>${I('x', 12)}</button>` : ''}</td>`)}</tr>
       ${ORDER.map(d => html`<tr><td style="width:50px">${DN[d]}</td>${names.map(n => html`<td><input type="text" style="width:100%;max-width:200px" value=${rangesTxt(s.hours[n][d])} placeholder="Off" onChange=${e => setDay(n, d, e.target.value)}/></td>`)}</tr>`)}</table>
     <button class="ghost" style="margin-top:8px" onClick=${async () => { const n = await ask('New Hours', 'Name'); if (n && /^[\w -]{1,30}$/.test(n) && !s.hours[n.toLowerCase()]) putSettings({ hours: { ...s.hours, [n.toLowerCase()]: { ...s.hours.personal } } }); }}>${I('plus', 15)}Add Hours</button>
+    <div class="cell" style="margin-top:8px"><span>Up from</span><input class="t24" value=${s.plan.wake || '08:00'} onChange=${e => { const v = n24(e.target.value); if (v) putSettings({ plan: { ...s.plan, wake: v } }); }}/></div>
+    <div class="cell"><span>Bedtime</span><input class="t24" value=${s.plan.bedtime || '23:00'} onChange=${e => { const v = n24(e.target.value); if (v) putSettings({ plan: { ...s.plan, bedtime: v } }); }}/></div>
   </div>`;
 }
 

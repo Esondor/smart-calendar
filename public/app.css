@@ -1072,3 +1072,8 @@ aside.files .fhead b{white-space:nowrap}
 .ev.fixed.drag,.ev.appt.drag,.ev.past.drag{opacity:.9;z-index:5}
 /* with a mouse: what you can drag shows it */
 @media (pointer:fine){.ev.block,.ev.busy:has(.rs),.ev.fixed.rm,.ev.past[data-k]{cursor:grab}.ev.drag{cursor:grabbing}}
+
+/* new appointment: priority from Low to ASAP in its colors, and where it is heading with an end date */
+.seg.wide{display:flex}.seg.wide button{flex:1}
+.appt .rise{font-size:12px;color:var(--muted);padding-top:0}
+.appt .rise i{display:inline-block;width:44px;height:6px;border-radius:3px}

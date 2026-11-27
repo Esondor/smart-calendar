@@ -170,23 +170,22 @@ export default function CalendarView() {
     el.addEventListener('touchend', end, { passive: true }); el.addEventListener('touchcancel', end, { passive: true });
     return () => { el.removeEventListener('touchstart', start); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', end); el.removeEventListener('touchcancel', end); };
   }, [month, mobile, zoom, hh, focus, cw, from]);
-  // desktop trackpad: scrolling sideways moves freely; a quick swipe turns one page, like the arrow buttons, and the
-  // momentum after it is used up, not scrolled. A new quick swipe while the last one still coasts turns the next page.
-  const stepRef = useRef(); stepRef.current = k => step(k);
+  // desktop (trackpad, a mouse's side wheel, Shift + wheel): sideways scrolling goes straight through and further than
+  // the browser's own, without snapping on every step; once it stops, it settles on the nearest day
   useEffect(() => {
     const el = sc.current; if (!el || month || guard) return;
-    let t0 = 0, last = 0, fired = 0, prev = 0;
+    let rest = null;
     const wheel = e => {
       const dx = e.deltaX || (e.shiftKey ? e.deltaY : 0);
       if (!dx || Math.abs(dx) < Math.abs(e.deltaY) && !e.shiftKey) return;
-      const t = e.timeStamp, a = Math.abs(dx);
-      if (t - last > 180 || (fired && t - fired > 350 && a > 15 && a > prev * 1.6)) { t0 = t; fired = 0; }   // a new gesture
-      last = t; prev = a;
-      if (fired) { e.preventDefault(); return; }
-      if (a >= 40 && t - t0 < 150) { e.preventDefault(); fired = t; stepRef.current(dx > 0 ? 1 : -1); }   // quick: one page
+      e.preventDefault();
+      const k = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? el.clientWidth : 1;   // lines, pages or pixels
+      el.style.scrollSnapType = 'none';
+      el.scrollLeft += dx * k * 2.5;
+      clearTimeout(rest); rest = setTimeout(() => { el.style.scrollSnapType = ''; }, 160);
     };
     el.addEventListener('wheel', wheel, { passive: false });
-    return () => el.removeEventListener('wheel', wheel);
+    return () => { el.removeEventListener('wheel', wheel); clearTimeout(rest); };
   }, [month, guard, mode]);
   const ticking = useRef(false);
   // more days/weeks are rendered only once scrolling has come to rest: on a phone the momentum (and the snapping in

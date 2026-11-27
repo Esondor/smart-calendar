@@ -1,4 +1,4 @@
-import { html, useState, S, api, post, patch, del, load, toast, openModal, confirmDialog, when, dh, DN, PRI, projectById, SH, n24 } from './lib.js';
+import { html, useState, S, api, post, patch, del, load, toast, openModal, confirmDialog, when, dh, DN, PRI, projectById, SH, n24, priColor, fromIso } from './lib.js';
 import { I } from './icons.js';
 import { moveDialog } from './now.js';
 import { PlaceInput, googleCals } from './eventsheet.js';
@@ -78,7 +78,8 @@ function Editor({ task, opts, close }) {
       <div class="row"><div class="seg">${DURS.map(d => html`<button type="button" class=${+f.duration === d ? 'on' : ''} onClick=${() => set({ duration: d })}>${d < 60 ? d + 'm' : d / 60 + 'h'}</button>`)}</div>
         ${!DURS.includes(+f.duration) && html`<span class="hint">${dh(f.duration)}</span>`}</div>
       <label>Priority</label>
-      <div class="seg">${PRI.map((p, i) => html`<button type="button" class=${+f.priority === i ? 'on' : ''} onClick=${() => set({ priority: i })}><span class=${'flag p' + i}></span>${p}</button>`)}</div>
+      <div class="seg">${[3, 2, 1, 0].map(i => html`<button type="button" class=${+f.priority === i ? 'on' : ''} style=${+f.priority === i ? { background: priColor(i), color: '#fff' } : null} onClick=${() => set({ priority: i })}>${PRI[i]}</button>`)}</div>
+      ${f.deadline && +f.priority > 0 && !(proj && (proj.meta?.ordered ?? proj.kind === 'outline')) && html`<div class="rise row" style="gap:6px;font-size:12px;color:var(--muted)"><i style=${{ display: 'inline-block', width: '44px', height: '6px', borderRadius: '3px', background: `linear-gradient(90deg,${priColor(+f.priority)},${priColor(0)})` }}></i>ASAP by ${DN[new Date(fromIso(f.deadline)).getDay()]} ${SH(fromIso(f.deadline))}</div>`}
       <label>Location</label>
       ${proj?.places ? html`<div class="seg">${proj.places.map(pl => html`<button type="button" class=${(f.location || '').toLowerCase() === pl.toLowerCase() ? 'on' : ''} onClick=${() => set({ location: pl })}>${pl}</button>`)}</div>` : S.state.maps ? html`<${PlaceInput} value=${f.location || ''} placeholder="None" onChange=${v => set({ location: v })} onTravel=${m => set({ meta: { ...(f.meta || {}), travel: m || undefined } })} travel=${f.meta?.travel || 0}/>`
       : html`<div><input list="sc-locs" placeholder="None" value=${f.location || ''} onInput=${e => set({ location: e.target.value })} style="width:220px"/>

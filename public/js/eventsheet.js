@@ -1,6 +1,6 @@
 // The sheet of a calendar event (Calendar and Now): title, day, time, calendar; whether it blocks, travel time;
 // the times it may be moved to (an hours set, e.g. a doctor's opening hours) and buttons to move it to the next free time.
-import { html, useState, useEffect, useRef, S, api, patch, post, load, toast, openModal, confirmDialog, askMinutes, addDays, hm, DN, SH, dh, isoDate, fromIso, n24 } from './lib.js';
+import { html, useState, useEffect, useRef, S, api, patch, post, load, toast, openModal, confirmDialog, askMinutes, addDays, hm, DN, SH, dh, isoDate, fromIso, n24, priColor } from './lib.js';
 import { I } from './icons.js';
 
 export const googleCals = () => S.state.accounts.filter(a => a.kind === 'google' && a.status === 'ok').flatMap(a => a.calendars.filter(c => c.writable && c.id !== S.state.settings?.plan?.calendarId).map(c => ({ ...c, acc: a.id })));
@@ -176,27 +176,30 @@ export async function openEventSheet(ev) {
   } catch (e) { toast(e.message); }
 }
 
-// New → Appointment: one kind. "Time": at a time you give, written to that calendar. "Planned": it takes a while and
-// Smart Calendar finds the time, in work / personal hours or a window (days, between times), from a day on and by an
-// end date; it is written to its calendar and moved there with the plan. Only what you choose opens more.
+// New → Appointment: one kind, everything it can have in view. "Time": at a time you give, written to that calendar.
+// "Planned": it takes a while and Smart Calendar finds the time, in work / personal hours or a window (days, between
+// times), from a day on and by an end date; it is written to its calendar and moved there with the plan. The priority
+// is where it starts: as the end date comes near it rises by itself (to ASAP, and then it may run into the evening).
 const DUR = [30, 60, 120];
+const PRIS = [[3, 'Low'], [2, 'Medium'], [1, 'High'], [0, 'ASAP']];
 export async function newAppointment(at = null) {
   const cals = googleCals(), names = Object.keys(S.state.settings?.hours || { work: 1, personal: 1 });
   const t0 = at || Math.ceil(Date.now() / 900000) * 900000;
   const r = await openModal(close => { const B = () => {
-    const [f, setF] = useState({ title: '', mode: cals.length ? 'time' : 'plan', day: isoDate(t0), s: hm(t0), e: hm(t0 + 3600e3), all_day: false, block: false,
+    const [f, setF] = useState({ title: '', mode: cals.length ? 'time' : 'plan', day: isoDate(t0), s: hm(t0), e: hm(t0 + 3600e3), all_day: false, block: true,
       minutes: 30, other: false, when: names.includes('personal') ? 'personal' : names[0], days: [1, 2, 3, 4, 5], ws: '08:00', we: '11:00',
-      from: isoDate(t0), until: '', priority: 2, cal: cals.length ? String((cals.find(c => c.use_busy) || cals[0]).id) : '', location: '', travel: 0, notes: '', more: false });
+      from: isoDate(t0), until: '', priority: 2, cal: cals.length ? String((cals.find(c => c.use_busy) || cals[0]).id) : '', location: '', travel: 0, notes: '' });
     const set = x => setF({ ...f, ...x }), plan = f.mode === 'plan';
     const ok = f.title.trim() && (plan ? f.minutes >= 5 && (f.when !== 'window' || (f.days.length && f.we > f.ws)) && (!f.until || f.until >= f.from) : f.all_day || f.e > f.s);
-    return html`<div class="modal sm"><input type="text" class="ttl" placeholder="Title" value=${f.title} onInput=${e => set({ title: e.target.value })}/>
-      ${cals.length > 0 && html`<div class="seg" style="margin-top:10px"><button type="button" class=${!plan ? 'on' : ''} onClick=${() => set({ mode: 'time' })}>Time</button><button type="button" class=${plan ? 'on' : ''} onClick=${() => set({ mode: 'plan' })}>Planned</button></div>`}
+    const untilTxt = f.until && `${DN[new Date(fromIso(f.until)).getDay()]} ${SH(fromIso(f.until))}`;
+    return html`<div class="modal sm appt"><input type="text" class="ttl" placeholder="Title" value=${f.title} onInput=${e => set({ title: e.target.value })}/>
+      ${cals.length > 0 && html`<div class="seg wide" style="margin-top:10px"><button type="button" class=${!plan ? 'on' : ''} onClick=${() => set({ mode: 'time' })}>Time</button><button type="button" class=${plan ? 'on' : ''} onClick=${() => set({ mode: 'plan' })}>Planned</button></div>`}
       <div class="box" style="margin-top:10px">
         ${!plan ? html`
           <div class="cell"><span>Day</span><input type="date" value=${f.day} onInput=${e => set({ day: e.target.value })}/></div>
           <div class="cell"><span>Time</span><span class="row" style="gap:6px;flex:none">${!f.all_day && html`<input class="t24" value=${f.s} onChange=${e => set({ s: n24(e.target.value) || f.s })}/>–<input class="t24" value=${f.e} onChange=${e => set({ e: n24(e.target.value) || f.e })}/>`}
-            <button type="button" class=${'ghost' + (f.all_day ? ' on' : '')} onClick=${() => set({ all_day: !f.all_day })}>All day</button></span></div>
-          ${f.all_day && html`<label class="cell"><span>Blocks time</span><input type="checkbox" checked=${f.block} onChange=${e => set({ block: e.target.checked })}/></label>`}`
+            <button type="button" class=${'ghost' + (f.all_day ? ' on' : '')} onClick=${() => set({ all_day: !f.all_day, block: f.all_day })}>All day</button></span></div>
+          <label class="cell"><span>Blocks time</span><input type="checkbox" checked=${f.block} onChange=${e => set({ block: e.target.checked })}/></label>`
         : html`
           <div class="cell ncell"><span>Takes</span><div class="seg ch">${DUR.map(m => html`<button type="button" class=${!f.other && f.minutes === m ? 'on' : ''} onClick=${() => set({ minutes: m, other: false })}>${m < 60 ? m + 'm' : m / 60 + 'h'}</button>`)}<button type="button" class=${f.other ? 'on' : ''} onClick=${() => set({ other: true })}>…</button></div></div>
           ${f.other && html`<div class="cell"><span>Minutes</span><input type="number" min="5" step="5" style="width:90px" value=${f.minutes} onInput=${e => set({ minutes: Math.max(0, +e.target.value || 0) })}/></div>`}
@@ -204,19 +207,19 @@ export async function newAppointment(at = null) {
           ${f.when === 'window' && html`<div class="cell"><span>Between</span><span class="row" style="gap:6px;flex:none"><input class="t24" value=${f.ws} onChange=${e => set({ ws: n24(e.target.value) || f.ws })}/>–<input class="t24" value=${f.we} onChange=${e => set({ we: n24(e.target.value) || f.we })}/></span></div>
             <div class="cell"><div class="seg days">${WD.map(([d, l]) => html`<button type="button" class=${f.days.includes(d) ? 'on' : ''} onClick=${() => set({ days: f.days.includes(d) ? f.days.filter(x => x !== d) : [...f.days, d] })}>${l}</button>`)}</div></div>`}
           <div class="cell"><span>From</span><input type="date" value=${f.from} onInput=${e => set({ from: e.target.value })}/></div>
-          <div class="cell"><span>Until</span><input type="date" value=${f.until} min=${f.from} onInput=${e => set({ until: e.target.value })}/></div>`}
+          <div class="cell"><span>Until</span><span class="row" style="gap:6px;flex:none"><input type="date" value=${f.until} min=${f.from} onInput=${e => set({ until: e.target.value })}/>${f.until && html`<button type="button" class="icon" title="No end date" onClick=${() => set({ until: '' })}>${I('x', 14)}</button>`}</span></div>
+          <div class="cell ncell"><span>Priority</span><div class="seg ch pri">${PRIS.map(([i, l]) => html`<button type="button" class=${f.priority === i ? 'on' : ''} style=${f.priority === i ? { background: priColor(i), color: '#fff' } : null} onClick=${() => set({ priority: i })}>${l}</button>`)}</div></div>
+          ${f.until && f.priority > 0 && html`<div class="cell rise"><span></span><span class="row" style="gap:6px"><i style=${{ background: `linear-gradient(90deg,${priColor(f.priority)},${priColor(0)})` }}></i>ASAP by ${untilTxt}</span></div>`}`}
         ${cals.length > 0 && html`<div class="cell"><span>Calendar</span><select value=${f.cal} onChange=${e => set({ cal: e.target.value })}>${plan && html`<option value="">Plan calendar</option>`}${cals.map(c => html`<option value=${c.id}>${c.name}</option>`)}</select></div>`}
-        ${f.more && html`
-          <div class="cell"><span>Place</span><${PlaceInput} value=${f.location} onChange=${v => set({ location: v })} onTravel=${plan ? m => set({ travel: m }) : null} travel=${f.travel}/></div>
-          ${plan && html`<div class="cell ncell"><span>Priority</span><div class="seg ch">${['ASAP', 'High', 'Medium', 'Low'].map((p, i) => html`<button type="button" class=${f.priority === i ? 'on' : ''} onClick=${() => set({ priority: i })}>${p}</button>`)}</div></div>`}
-          <div class="cell"><textarea rows="2" style="width:100%" placeholder="Notes" value=${f.notes} onInput=${e => set({ notes: e.target.value })}></textarea></div>`}
+        <div class="cell"><span>Place</span><${PlaceInput} value=${f.location} onChange=${v => set({ location: v })} onTravel=${plan ? m => set({ travel: m }) : null} travel=${f.travel}/></div>
+        <div class="cell"><textarea rows="2" style="width:100%" placeholder="Notes" value=${f.notes} onInput=${e => set({ notes: e.target.value })}></textarea></div>
       </div>
-      <div class="acts">${!f.more && html`<button class="ghost" onClick=${() => set({ more: true })}>More</button>`}<span style="flex:1"></span><button onClick=${() => close(null)}>Cancel</button><button class="pri" disabled=${!ok} onClick=${() => close(f)}>Add</button></div></div>`; }; return html`<${B}/>`; });
+      <div class="acts"><button onClick=${() => close(null)}>Cancel</button><button class="pri" disabled=${!ok} onClick=${() => close(f)}>Add</button></div></div>`; }; return html`<${B}/>`; });
   if (!r) return;
   try {
     if (r.mode === 'time') {
       const base = fromIso(r.day);
-      await post('/api/events', { calendar_id: +r.cal, title: r.title.trim(), all_day: r.all_day, start: r.all_day ? base : atTime(r.day, r.s), end: r.all_day ? addDays(base, 1) : atTime(r.day, r.e), location: r.location.trim() || null, notes: r.notes.trim() || null, free: r.all_day ? !r.block : false });
+      await post('/api/events', { calendar_id: +r.cal, title: r.title.trim(), all_day: r.all_day, start: r.all_day ? base : atTime(r.day, r.s), end: r.all_day ? addDays(base, 1) : atTime(r.day, r.e), location: r.location.trim() || null, notes: r.notes.trim() || null, free: !r.block });
       await load(['plan']);
     } else {
       await post('/api/flexible', { title: r.title.trim(), minutes: r.minutes, win: r.when === 'window' ? { days: r.days, s: r.ws, e: r.we } : null, schedule: r.when === 'window' ? null : r.when,

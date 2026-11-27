@@ -23,7 +23,10 @@ test('priority rises as the end date comes near', () => {
   assert.ok(effPri(unit(3, 1), now) < 1, 'a day left: nearly ASAP');
   assert.equal(effPri(unit(3, -1), now), 0, 'past: ASAP');
   assert.equal(effPri(unit(1, 30), now), 1, 'never lower than set');
-  assert.equal(effPri(unit(3, 1, { period: 5 }), now), 3, 'repeating: each round as set');
+  const round = (days, len) => unit(3, days, { period: 5, periodStart: now - (len - days) * D, periodEnd: now + days * D });
+  assert.ok(effPri(round(0.2, 7), now) < 1, 'a weekly chore near the end of its week: nearly ASAP');
+  assert.ok(effPri(round(3, 7), now) >= 2, 'mid-week: not yet');
+  assert.ok(effPri(round(0.75, 1), now) >= 2, 'a daily one is not red all day');
   assert.equal(effPri(unit(3, 1, { overdue: true }), now), 0);
 });
 
@@ -41,4 +44,22 @@ test('a planned appointment: in personal hours, from a day, by an end date, with
 test('an ordered project (a thesis) keeps its priority: it is worked through in its order', () => {
   assert.equal(effPri(unit(3, 1, { ordered: true }), now), 3);
   assert.equal(effPri(unit(3, 1), now) < 1, true, 'a normal task rises');
+});
+
+test('due today with its hours over: it goes in this evening before bedtime, not after the deadline', () => {
+  const v = createUser({ username: 'late1', name: 'L', password: 'long password 123' });
+  const st = settingsOf(v), am = Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map(d => [d, ['08:00', '12:00']]));
+  st.hours = { work: am, personal: am }; st.fixed = []; st.plan.bedtime = '22:30'; saveSettings(v, st);
+  const day = new Date(now).toLocaleDateString('sv'), at15 = new Date(day + 'T15:00').getTime();
+  const id = createFlexible(v, { title: 'Due today', minutes: 30, schedule: 'personal', startAfter: day, deadline: day, priority: 2 });
+  const p = planUser(v, at15), b = p.blocks.find(x => x.key === String(id));
+  assert.ok(b, 'planned');
+  assert.equal(new Date(b.s).toLocaleDateString('sv'), day, 'today');
+  assert.ok(b.s >= at15 && b.e <= new Date(day + 'T22:30').getTime(), 'after now, before bedtime');
+  assert.equal(p.info[String(id)].late, false);
+  assert.ok(p.units[String(id)].pri < 0.5, 'ASAP by now');
+  // without an end date it waits for its hours tomorrow
+  const id2 = createFlexible(v, { title: 'Whenever', minutes: 30, schedule: 'personal', startAfter: day });
+  const b2 = planUser(v, at15).blocks.find(x => x.key === String(id2));
+  assert.notEqual(new Date(b2.s).toLocaleDateString('sv'), day);
 });

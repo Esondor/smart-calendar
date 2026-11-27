@@ -47,6 +47,8 @@ function subtract(free, occ) {
  *                          after: starts only once that earlier item is finished (projects with a fixed order)
  *                          before: try to finish before this time (a later task of the same ordered project was moved there)
  *                          win: { days, s, e } an appointment: one piece, only in this window, placed smartly (see smartSlot)
+ *                          stretch: { s, e } minutes of the day: if its hours run out before its deadline, it may go on
+ *                          after them until e (bedtime), and on a day without its hours from s on, rather than be late
  */
 export function schedule({ now, horizonDays = 62, hours, chunk = 30, busy = [], items }) {
   const start = Math.ceil(now / 300000) * 300000;  // next 5-minute mark
@@ -124,7 +126,13 @@ export function schedule({ now, horizonDays = 62, hours, chunk = 30, busy = [], 
   }
 
   const blocks = [], info = {};
-  const windowsOf = (it, date, strict) => {
+  // its hours on a day, with the evening up to bedtime added (a day without its hours: from the morning to bedtime)
+  const stretched = (it, date, own) => {
+    const w = own(it, date, false), bed = at(date, it.stretch.e);
+    const lastEnd = w.length ? Math.max(...w.map(([, b]) => b)) : at(date, it.stretch.s);
+    return lastEnd < bed ? [...w, [lastEnd, bed]] : w;
+  };
+  let windowsOf = (it, date, strict) => {
     if (it.win) return it.win.days.includes(wd(date)) ? [[at(date, tm(it.win.s)), at(date, tm(it.win.e))]] : [];
     const w = (hours[it.schedule] || hours.work || {})[wd(date)];
     let fr = ranges(w).map(([a, b]) => [tm(a), tm(b)]);
@@ -202,6 +210,11 @@ export function schedule({ now, horizonDays = 62, hours, chunk = 30, busy = [], 
     if (it.win) { /* placed above, or not at all */ }
     else if (it.before) fill(false, lastDay, it.before);   // ordered project: fit in before the moved task that comes after it
     if (!it.win && hasPref) fill(true, dl < lastDay ? dl : lastDay);
+    // a deadline that its hours cannot meet: before giving up, the evenings up to bedtime (and days off from the morning)
+    if (!it.win && it.stretch && it.deadline && left > 0.5) {
+      fill(false, dl);
+      if (left > 0.5) { const own = windowsOf; windowsOf = (o, d, strict) => o !== it ? own(o, d, strict) : stretched(o, d, own); fill(false, dl); windowsOf = own; }
+    }
     if (!it.win && left > 0.5) fill(false, lastDay);
     mine.sort((a, b) => a.s - b.s);
     mine.forEach((b, i) => { b.part = i + 1; b.parts = mine.length; blocks.push(b); });
