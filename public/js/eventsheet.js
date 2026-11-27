@@ -239,7 +239,7 @@ export async function newAppointment(at = null, end = null, pre = {}) {
     return html`<div class="modal sm appt"><input type="text" class=${'ttl' + bad('title')} placeholder="Title" value=${f.title} onInput=${x => set({ title: x.target.value })}/>
       ${(cals.length > 0 || W.length > 0) && html`<div style="margin-top:12px"><${Switch2} a="Time" b="Planned" right=${plan} set=${v => set({ plan: v })}/></div>`}
       <div class="box" style="margin-top:12px">
-        ${ppl?.length > 0 && html`<div class="cell ncell"><span>With</span><div class="chips">${ppl.map(u => html`<button type="button" class=${'chipb' + (W.includes(u.id) ? ' on' : '')} onClick=${() => set({ with: W.includes(u.id) ? W.filter(x => x !== u.id) : [...W, u.id] })}>${u.name}</button>`)}</div></div>`}
+        ${ppl?.length > 0 && html`<div class="cell ncell"><span>With</span><div class="chips">${ppl.map(u => html`<button type="button" class=${'chipb' + (W.includes(u.id) ? ' on' : '')} onClick=${() => setF(p => { const w = p.with || []; return { ...p, with: w.includes(u.id) ? w.filter(x => x !== u.id) : [...w, u.id] }; })}>${u.name}</button>`)}</div></div>`}
         <div class=${'cell two' + bad('due') + bad('end')}><div><span class="lbl">Start</span><${DateTime} d=${f.sd} t=${f.st} empty=${!plan && f.all_day} setD=${v => setStart({ sd: v })} setT=${v => setStart({ st: v || f.st })}/></div>
           <div><span class="lbl">${plan ? 'Due' : 'End'}${plan && f.dd && html`<button type="button" class="icon" title="No due date" onClick=${() => set({ dd: '', dt: '' })}>${I('x', 13)}</button>`}</span>${plan
             ? html`<div class="dt">${f.dd ? html`<input type="date" value=${f.dd} min=${f.sd} onInput=${x => set({ dd: x.target.value })}/><div class="tm"><input class="t24" value=${f.dt} placeholder="--:--" onChange=${x => set({ dt: n24(x.target.value) || '' })}/></div>`
@@ -271,7 +271,9 @@ export async function newAppointment(at = null, end = null, pre = {}) {
     if (r.with?.length) {
       let s = r.s, e = r.e;
       if (r.plan) {
-        const [x] = await post('/api/people/slots', { members: r.with, minutes: r.minutes, hours: r.win ? 'all' : r.when, win: r.win ? { days: r.days, s: r.ws, e: r.we } : null, after: r.s, until: e || 0, perDay: 1, max: 1, urgent: true });
+        // the best time for everyone: the first one where nobody's plan has to move, else the earliest that works
+        const L = await post('/api/people/slots', { members: r.with, minutes: r.minutes, hours: r.win ? 'all' : r.when, win: r.win ? { days: r.days, s: r.ws, e: r.we } : null, after: r.s, until: e || 0, perDay: 3, max: 60 });
+        const x = L.find(y => y.fit === 'best') || L[0];
         if (!x) return toast('No time when everyone is free');
         s = x.s; e = x.e;
       }

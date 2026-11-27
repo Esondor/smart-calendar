@@ -1205,3 +1205,10 @@ aside.files .box.clash{margin:0 0 8px}
 .chipb.on{background:var(--acc);color:#fff}
 .cell.avail span{color:var(--done);font-size:13.5px}.cell.avail.no span{color:var(--late)}
 .cell.avail .ghost{padding:4px 10px;font-size:13px;min-height:0}
+
+/* buttons check: Decline as a pill like Accept; the project toolbar in one line on a phone (avatars are in the project list) */
+aside.files .nbtn button:not(.pri){background:var(--fill)}
+@media (max-width:860px){.pvwrap .ptools .avs,.ptools>.avs{display:none}}
+
+@media (max-width:860px){.ptools button.icon{width:36px;min-width:36px;height:36px;min-height:36px}.ptools{gap:4px}}
+@media (max-width:860px){.ptools .seg.pvseg button{padding:6px 11px;font-size:13px}}

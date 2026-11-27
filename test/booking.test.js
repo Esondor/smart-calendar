@@ -95,3 +95,17 @@ test('an appointment with people you know: free for both, booked for both; stran
   assert.ok(get(`SELECT 1 FROM appts WHERE user_id = ? AND start = ? AND title = 'Lunch talk'`, me, S[0].s) && get(`SELECT 1 FROM appts WHERE user_id = ? AND start = ? AND title = 'Lunch talk'`, bo, S[0].s));
   assert.equal((await call(me, 'POST', '/api/people/book', { title: 'Again', members: [bo], start: S[0].s, end: S[0].e })).code, 409, 'both taken now');
 });
+
+test('more than one other: a time is only offered and booked when all of them are free', async () => {
+  const kim = mkUser('kim', '09:00', '18:00');
+  const pid = Number(run(`INSERT INTO projects(name, owner_id, created_at) VALUES ('Trio', ?, ?)`, me, now).lastInsertRowid);
+  [me, bo, kim].forEach(u => run('INSERT INTO project_members(project_id, user_id) VALUES (?, ?)', pid, u));
+  const d2 = new Date(now + 3 * D).toLocaleDateString('sv'), t = h => new Date(`${d2}T${h}`).getTime();
+  A.addAppt(kim, t('13:00'), t('14:00'), 'Kim busy', 'appt');
+  const S = (await call(me, 'POST', '/api/people/slots', { members: [bo, kim], minutes: 60, after: t('13:00'), until: t('17:00'), perDay: 10 })).j;
+  assert.ok(S.length && S.every(x => x.s >= t('14:00')), 'Bo has hours from 13, Kim is busy 13–14: from 14 on');
+  assert.deepEqual((await call(me, 'POST', '/api/people/check', { members: [bo, kim], start: t('13:00'), end: t('14:00') })).j.busy, [kim]);
+  assert.equal((await call(me, 'POST', '/api/people/book', { title: 'Trio', members: [bo, kim], start: S[0].s, end: S[0].e })).j.ok, true);
+  for (const u of [me, bo, kim]) assert.ok(get(`SELECT 1 FROM appts WHERE user_id = ? AND start = ? AND title = 'Trio'`, u, S[0].s), 'booked for all three');
+  assert.equal(all(`SELECT * FROM inbox WHERE kind = 'hold' AND json_extract(data, '$.title') = 'Trio'`).length, 2, 'Keep / Decline for both others');
+});

@@ -158,7 +158,7 @@ export default function ProjectView({ id }) {
       <${TeamButton} p=${p}/>${p.members.length > 1 && html`<button class="icon" title="Find a Time" aria-label="Find a time" onClick=${() => findTime(p)}>${I('calendar')}</button>`}
       <button class="icon" title="Share" aria-label="Share" onClick=${() => share(p)}>${I('people')}</button>
       <button class="icon" title="Project Settings" onClick=${() => projectSettings(p)}>${I('gear')}</button>
-      <button onClick=${async () => setFeed(feed ? null : await api('/api/activity?project=' + id))}>${feed ? 'Hide' : 'Activity'}</button>
+      <button class=${'icon' + (feed ? ' on' : '')} title="Activity" aria-label="Activity" onClick=${async () => setFeed(feed ? null : await api('/api/activity?project=' + id))}>${I('clock')}</button>
       ${p.ext_source === 'vikunja' ? html`<span class="hint">Vikunja</span>` : ''}
       <span class="grow"></span>
     </div>

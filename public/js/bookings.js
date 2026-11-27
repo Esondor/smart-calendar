@@ -30,7 +30,7 @@ async function editLink(l) {
     const set = x => setF({ ...f, ...x }), [tried, setTried] = useState(false), ok = f.title.trim() && f.minutes.length;
     return html`<div class="modal sm appt"><input type="text" class=${'ttl' + (tried && !f.title.trim() ? ' bad' : '')} placeholder="Meeting" value=${f.title} onInput=${e => set({ title: e.target.value })}/>
       <div class="box" style="margin-top:12px">
-        <div class=${'cell ncell' + (tried && !f.minutes.length ? ' bad' : '')}><span>Lengths</span><div class="seg ch">${DURS.map(m => html`<button type="button" class=${f.minutes.includes(m) ? 'on' : ''} onClick=${() => set({ minutes: f.minutes.includes(m) ? f.minutes.filter(x => x !== m) : [...f.minutes, m].sort((a, b) => a - b) })}>${m < 60 ? m + 'm' : m / 60 + 'h'}</button>`)}</div></div>
+        <div class=${'cell ncell' + (tried && !f.minutes.length ? ' bad' : '')}><span>Lengths</span><div class="chips">${DURS.map(m => html`<button type="button" class=${'chipb' + (f.minutes.includes(m) ? ' on' : '')} onClick=${() => set({ minutes: f.minutes.includes(m) ? f.minutes.filter(x => x !== m) : [...f.minutes, m].sort((a, b) => a - b) })}>${m < 60 ? m + 'm' : m / 60 + 'h'}</button>`)}</div></div>
         <div class="cell"><span>In</span><${SwitchN} opts=${hoursOpts()} value=${f.hours} set=${v => set({ hours: v })}/></div>
         <div class="cell"><span>Days ahead</span><input type="number" min="1" max="90" style="width:76px" value=${f.days} onInput=${e => set({ days: +e.target.value || 21 })}/></div>
         <div class="cell"><span>Notice</span><select value=${f.notice} onChange=${e => set({ notice: +e.target.value })}>${[[0, 'None'], [60, '1 hour'], [120, '2 hours'], [1440, '1 day'], [2880, '2 days']].map(([v, t]) => html`<option value=${v}>${t}</option>`)}</select></div>
@@ -55,6 +55,13 @@ export async function findTime(p) {
     const [f, setF] = useState({ title: '', members: others.map(m => m.id), minutes: 60, hours: 'all', urgent: false }), set = x => setF({ ...f, ...x });
     const [slots, setSlots] = useState(null), [busy, setBusy] = useState(false), [tried, setTried] = useState(false);
     const find = async () => { setBusy(true); try { setSlots(await post(`/api/projects/${p.id}/slots`, { members: f.members, minutes: f.minutes, hours: f.hours, urgent: f.urgent, days: 14 })); } catch (e) { toast(e.message); } finally { setBusy(false); } };
+    // Auto: no choosing; the best time for everyone (nobody's plan moves, else the earliest that works) is booked
+    const auto = async () => {
+      if (!f.title.trim()) return setTried(true);
+      setBusy(true);
+      try { const L = await post(`/api/projects/${p.id}/slots`, { members: f.members, minutes: f.minutes, hours: f.hours, urgent: f.urgent, days: 30 }), x = (!f.urgent && L.find(y => y.fit === 'best')) || L[0];
+        if (!x) { toast('No time when everyone is free'); return; } await book(x); } finally { setBusy(false); }
+    };
     useEffect(() => { setSlots(null); }, [f.members.join(), f.minutes, f.hours, f.urgent]);
     const book = async x => {
       if (!f.title.trim()) return setTried(true);
@@ -63,12 +70,13 @@ export async function findTime(p) {
     const days = []; for (const x of slots || []) { const k = new Date(x.s).toDateString(); let d = days.find(y => y.k === k); if (!d) days.push(d = { k, s: x.s, L: [] }); d.L.push(x); }
     return html`<div class="modal sm appt"><input type="text" class=${'ttl' + (tried && !f.title.trim() ? ' bad' : '')} placeholder="Title" value=${f.title} onInput=${e => setF({ ...f, title: e.target.value })}/>
       <div class="box" style="margin-top:12px">
-        <div class="cell ncell"><span>With</span><div class="seg ch">${others.map(m => html`<button type="button" class=${f.members.includes(m.id) ? 'on' : ''} onClick=${() => set({ members: f.members.includes(m.id) ? f.members.filter(x => x !== m.id) : [...f.members, m.id] })}>${m.name}</button>`)}</div></div>
+        <div class="cell ncell"><span>With</span><div class="chips">${others.map(m => html`<button type="button" class=${'chipb' + (f.members.includes(m.id) ? ' on' : '')} onClick=${() => setF(p => ({ ...p, members: p.members.includes(m.id) ? p.members.filter(x => x !== m.id) : [...p.members, m.id] }))}>${m.name}</button>`)}</div></div>
         <div class="cell"><span>Takes</span><${Duration} value=${f.minutes} set=${m => set({ minutes: m })}/></div>
         <div class="cell"><span>In</span><${SwitchN} opts=${hoursOpts()} value=${f.hours} set=${v => set({ hours: v })}/></div>
         <div class="cell"><span>When</span><${SwitchN} opts=${[[false, 'Best fit'], [true, 'Earliest']]} value=${f.urgent} set=${v => set({ urgent: v })}/></div>
       </div>
-      ${slots == null ? html`<button class="pri wide" style="width:100%;margin-top:12px;justify-content:center" disabled=${busy || !f.members.length} onClick=${find}>Find Times</button>`
+      ${slots == null ? html`<div class="row" style="gap:8px;margin-top:12px"><button style="flex:1;justify-content:center" disabled=${busy || !f.members.length} onClick=${find}>Find Times</button>
+          <button class="pri" style="flex:1;justify-content:center" disabled=${busy || !f.members.length} onClick=${auto}>Auto</button></div>`
         : !slots.length ? html`<p class="hint" style="margin:12px 4px">No time when everyone is free</p>`
         : html`<div class="slots">${days.map(d => html`<div class="tday">${DN[new Date(d.s).getDay()]} ${SH(d.s)}</div><div class="srow">${d.L.map(x => html`<button class=${'slot ' + x.fit} title=${x.fit === 'best' ? 'Free for everyone' : 'Free; planned tasks move'} onClick=${() => book(x)}>${hm(x.s)}</button>`)}</div>`)}</div>`}
       <div class="acts"><button onClick=${() => close(null)}>Cancel</button></div></div>`; }; return html`<${B}/>`; });
