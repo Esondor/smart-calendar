@@ -44,7 +44,9 @@ export function projectPlaces(p) {
   return /haus|household|home|wohnung/i.test(p.name || '') ? DEFAULT_PLACES : null;
 }
 export function projectRow(p) {
-  return { ...p, columns: J(p.columns, []), meta: J(p.meta, {}), archived: !!p.archived, members: membersOf(p.id), places: projectPlaces(p) };
+  // archived tasks are out of the lists but still count for the project's progress
+  const arch = get('SELECT COUNT(*) n, COALESCE(SUM(duration), 0) m FROM tasks WHERE project_id = ? AND archived_at IS NOT NULL', p.id) || { n: 0, m: 0 };
+  return { ...p, columns: J(p.columns, []), meta: J(p.meta, {}), archived: !!p.archived, members: membersOf(p.id), places: projectPlaces(p), arch };
 }
 export function taskRow(t) {
   return { ...t, recur: J(t.recur, null), points: J(t.points, []), meta: J(t.meta, {}), auto: !!t.auto };

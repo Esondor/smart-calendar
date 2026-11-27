@@ -27,7 +27,7 @@ export function setDone(uid, taskId, period, done, via = 'app') {
     } else {
       const cols = J(get('SELECT columns FROM projects WHERE id = ?', t.project_id).columns, []);
       if (done) run(`UPDATE tasks SET status = 'done', col = ?, done_at = ?, done_by = ?, do_next = NULL, updated_at = ? WHERE id = ?`, Math.max(0, cols.length - 1), Date.now(), uid, Date.now(), taskId);
-      else run(`UPDATE tasks SET status = 'todo', col = CASE WHEN col >= ? THEN 0 ELSE col END, done_at = NULL, done_by = NULL, updated_at = ? WHERE id = ?`, Math.max(1, cols.length - 1), Date.now(), taskId);
+      else run(`UPDATE tasks SET status = 'todo', col = CASE WHEN col >= ? THEN 0 ELSE col END, done_at = NULL, done_by = NULL, archived_at = NULL, updated_at = ? WHERE id = ?`, Math.max(1, cols.length - 1), Date.now(), taskId);
       // ticking a leaf ticks its checklist; finishing all children of a parent closes the parent
       if (done) { const pts = t.points.map(x => ({ ...x, done: true })); run('UPDATE tasks SET points = ? WHERE id = ?', JSON.stringify(pts), taskId); }
       for (let pid = t.parent_id; pid; pid = get('SELECT parent_id FROM tasks WHERE id = ?', pid)?.parent_id) {
@@ -300,6 +300,26 @@ export function restoreTask(uid, token) {
   DELETED.delete(token);
   const t = d.snap.tasks[0]; if (t) touchProject(t.project_id);
   return t?.id ?? null;
+}
+// the archive of a board: done tasks put away, by hand or after the project's setting (meta.archiveAfter days, default
+// 7, 0 = never); repeating tasks and outlines (a thesis keeps its structure) are never archived
+export const ARCHIVE_DAYS = p => { const m = J(p.meta, {}); return m.archiveAfter == null ? 7 : Math.max(0, +m.archiveAfter || 0); };
+export function archiveTask(uid, id, on = true) {
+  const t = taskById(id); if (!t || (on && t.status !== 'done')) return false;
+  run('UPDATE tasks SET archived_at = ? WHERE id = ?', on ? Date.now() : null, id);
+  logActivity(t.project_id, uid, `${on ? 'Archived' : 'Restored'} ${t.title}`); touchProject(t.project_id);
+  return true;
+}
+export function archiveDone(uid, pid, olderThan = Date.now()) {
+  const n = run(`UPDATE tasks SET archived_at = ? WHERE project_id = ? AND status = 'done' AND archived_at IS NULL AND recur IS NULL AND COALESCE(done_at, updated_at) <= ?`, Date.now(), pid, olderThan).changes;
+  if (n && uid) { logActivity(pid, uid, `Archived ${n} done`); touchProject(pid); }
+  return n;
+}
+export function archiveTick(now = Date.now()) {
+  for (const p of all(`SELECT id, meta FROM projects WHERE kind = 'board' AND archived = 0`)) {
+    const d = ARCHIVE_DAYS(p); if (!d) continue;
+    if (archiveDone(null, p.id, now - d * 864e5)) touchProject(p.id);
+  }
 }
 export { touchProject };
 

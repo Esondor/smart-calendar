@@ -84,3 +84,21 @@ test('a removed session and a skipped round come back', () => {
   A.skipOccurrence(u, r, 3); assert.ok(get('SELECT 1 FROM occurrences WHERE task_id = ? AND period = 3', r));
   A.unskipOccurrence(u, r, 3); assert.ok(!get('SELECT 1 FROM occurrences WHERE task_id = ? AND period = 3', r));
 });
+
+test('the archive: done tasks of a board go there after the project setting; reopening takes one out', () => {
+  const pid2 = Number(run(`INSERT INTO projects(name, owner_id, created_at, kind, meta) VALUES ('Home', ?, ?, 'board', '{"archiveAfter":7}')`, u, now).lastInsertRowid);
+  run('INSERT INTO project_members(project_id, user_id) VALUES (?, ?)', pid2, u);
+  const mk = (title, doneAgo) => Number(run(`INSERT INTO tasks(project_id, title, duration, created_by, assignee_id, created_at, updated_at, status, done_at) VALUES (?, ?, 30, ?, ?, ?, ?, ?, ?)`,
+    pid2, title, u, u, now, now, doneAgo == null ? 'todo' : 'done', doneAgo == null ? null : now - doneAgo * 864e5).lastInsertRowid);
+  const old = mk('Old', 9), fresh = mk('Fresh', 2), open = mk('Open');
+  A.archiveTick(now);
+  assert.ok(get('SELECT archived_at FROM tasks WHERE id = ?', old).archived_at, 'done a week ago: archived');
+  assert.equal(get('SELECT archived_at FROM tasks WHERE id = ?', fresh).archived_at, null, 'done lately: still in Done');
+  assert.equal(get('SELECT archived_at FROM tasks WHERE id = ?', open).archived_at, null);
+  assert.equal(A.archiveDone(u, pid2), 1, 'Archive all: the rest of Done');
+  assert.equal(A.archiveTask(u, open), false, 'only done tasks');
+  A.setDone(u, old, 0, false);
+  assert.equal(get('SELECT archived_at FROM tasks WHERE id = ?', old).archived_at, null, 'reopened: out of the archive');
+  run(`UPDATE projects SET meta = '{"archiveAfter":0}' WHERE id = ?`, pid2); A.setDone(u, old, 0, true); run('UPDATE tasks SET done_at = ? WHERE id = ?', now - 100 * 864e5, old);
+  A.archiveTick(now); assert.equal(get('SELECT archived_at FROM tasks WHERE id = ?', old).archived_at, null, 'Never: stays');
+});

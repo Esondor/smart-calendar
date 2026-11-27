@@ -1146,3 +1146,24 @@ aside.files .tgroup .ffile:first-child{border-top:0}
 /* a range being dragged on empty space (mouse): where the new entry will be */
 .ev.ghost{left:2px;right:2px;background:var(--acc-s);border:1.5px dashed var(--acc);color:var(--acc);pointer-events:none;z-index:3}
 @media (pointer:fine){.daycol{cursor:cell}}
+
+/* the board's archive: folded to a narrow column you can drop on; unfolded a plain list */
+.colm.arch{flex:0 0 44px;min-width:44px;background:none;border:1px dashed var(--line);transition:flex-basis .2s}
+.colm.arch.open{flex:0 0 260px;border-style:solid;background:var(--fill2)}
+.colm.arch.over{border-color:var(--acc);background:var(--acc-s)}
+.colm.arch h4{display:flex;align-items:center;gap:6px}
+.colm.arch:not(.open) h4{writing-mode:vertical-rl;transform:rotate(180deg);margin:8px auto}
+.colm.arch .archt{background:none;padding:2px 0;color:var(--muted);font-weight:600;font-size:13px;gap:4px}
+.colm.arch:not(.open) .archt svg{display:none}
+.alist{list-style:none;margin:0;padding:0 4px;overflow:auto;font-size:13px}
+.alist li{display:flex;align-items:center;gap:6px;padding:5px 4px;border-top:1px solid var(--line)}
+.alist li:first-child{border-top:0}
+.alist .at{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);cursor:pointer}
+.alist .icon{opacity:0;width:24px;height:24px;min-width:24px;min-height:24px;padding:0}
+.alist li:hover .icon{opacity:.7}
+@media (hover:none){.alist .icon{opacity:.7}}
+.colm h4 .archall{margin-left:auto;width:26px;height:26px;min-width:26px;min-height:26px;padding:0;opacity:.6}
+.colm>h4{display:flex;align-items:center;gap:6px}
+@media (max-width:860px){.colm.arch,.colm.arch.open{flex:none;min-width:0}.colm.arch:not(.open) h4{writing-mode:horizontal-tb;transform:none;margin:4px 8px}}
+.colm>h4{justify-content:flex-start}.colm>h4>span{margin-left:auto}.colm h4 .archall{margin-left:0}
+.card .ct .flag{flex:none;width:8px;height:8px;border-radius:50%}

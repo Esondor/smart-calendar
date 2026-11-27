@@ -40,6 +40,8 @@ export async function projectSettings(p) {
         <label class="row"><span class="hint" style="width:110px">Wall display</span><input type="checkbox" checked=${f.wall} onChange=${e => set({ wall: e.target.checked })}/></label>
         ${f.kind === 'outline' && html`<label class="row"><span class="hint" style="width:110px">Levels</span><input type="text" class="grow" placeholder=${p?.meta?.groups ? 'Chapter, Section' : 'Category, Section'} value=${f.levels || ''} onInput=${e => set({ levels: e.target.value })}/></label>`}
         <label class="row"><span class="hint" style="width:110px">Places</span><input type="text" class="grow" placeholder="Keller, Garage, Wohnung" value=${f.places || ''} onInput=${e => set({ places: e.target.value })}/></label>
+        ${f.kind !== 'outline' && html`<label class="row"><span class="hint" style="width:110px">Archive done</span><select value=${String(f.archiveAfter ?? p?.meta?.archiveAfter ?? 7)} onChange=${e => set({ archiveAfter: +e.target.value })}>
+          <option value="1">After a day</option><option value="7">After a week</option><option value="30">After a month</option><option value="0">Never</option></select></label>`}
         <label class="row"><span class="hint" style="width:110px">Keep order</span><input type="checkbox" checked=${f.ordered} onChange=${e => set({ ordered: e.target.checked })}/></label>
         ${p && writableCals().length > 0 && html`<label class="row"><span class="hint" style="width:110px">Calendar</span><${CalendarSelect} value=${f.cal} name=${f.name || p.name} onChange=${v => set({ cal: v })}/></label>
           ${p.members.length > 1 && f.cal && html`<label class="row"><span class="hint" style="width:110px">Shared</span><input type="checkbox" checked=${f.shared} onChange=${e => set({ shared: e.target.checked })}/></label>`}`}
@@ -51,7 +53,7 @@ export async function projectSettings(p) {
   try {
     if (r.delete) { if (!(await confirmDialog(p.owner_id === S.state.me.id ? `Delete “${p.name}” with all its tasks for everyone?` : `Leave “${p.name}”?`, 'Yes', true))) return; await del('/api/projects/' + p.id); go('#/tasks'); }
     else {
-      const body = { name: r.name || 'Project', color: r.color, schedule: r.schedule, columns: String(r.columns).split(',').map(x => x.trim()).filter(Boolean), target_date: r.target_date || null, kind: r.kind, meta: { ...(p?.meta || {}), wall: !!r.wall, ordered: !!r.ordered, places: String(r.places || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 12), levels: String(r.levels || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 2), ...(r.shared ? {} : { sharedCal: undefined }) }, ...('archived' in r ? { archived: r.archived } : {}) };
+      const body = { name: r.name || 'Project', color: r.color, schedule: r.schedule, columns: String(r.columns).split(',').map(x => x.trim()).filter(Boolean), target_date: r.target_date || null, kind: r.kind, meta: { ...(p?.meta || {}), wall: !!r.wall, ordered: !!r.ordered, places: String(r.places || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 12), levels: String(r.levels || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 2), archiveAfter: r.archiveAfter ?? p?.meta?.archiveAfter ?? 7, ...(r.shared ? {} : { sharedCal: undefined }) }, ...('archived' in r ? { archived: r.archived } : {}) };
       const np = p ? await patch('/api/projects/' + p.id, body) : await post('/api/projects', body);
       if (p && (r.cal !== String(S.state.settings?.plan?.projectCalendars?.[p.id] || '') || (r.shared && !p.meta?.sharedCal))) await setProjectCalendar(p, r.cal, r.shared && r.cal, r.name);
       if (!p) go('#/project/' + np.id);
@@ -97,18 +99,36 @@ function Card({ t, cols, onDragStart }) {
 function Progress({ p }) {
   const st = S.state, L = st.tasks.filter(t => t.project_id === p.id && isLeaf(t) && !['chapter', 'section'].includes(t.meta?.level));
   if (!L.length) return null;
-  const tot = L.reduce((a, t) => a + (t.duration || 0), 0) || 1, dn = L.filter(t => t.status === 'done').reduce((a, t) => a + (t.duration || 0), 0) + L.filter(t => t.status !== 'done').reduce((a, t) => a + Math.min(t.spent || 0, t.duration || 0), 0);
+  const am = p.arch?.m || 0, tot = (L.reduce((a, t) => a + (t.duration || 0), 0) + am) || 1, dn = am + L.filter(t => t.status === 'done').reduce((a, t) => a + (t.duration || 0), 0) + L.filter(t => t.status !== 'done').reduce((a, t) => a + Math.min(t.spent || 0, t.duration || 0), 0);
   const pct = Math.round(100 * dn / tot), end = st.plan?.projectEnds?.[p.id], tgt = p.target_date ? fromIso(p.target_date) : null, late = end && tgt && end > tgt + 864e5;
   const day = ms => { const d = new Date(ms); return `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ${SH(ms)}`; };
-  return html`<div class="pprog" title=${`${L.filter(t => t.status === 'done').length} of ${L.length} tasks done`}>
+  return html`<div class="pprog" title=${`${L.filter(t => t.status === 'done').length + (p.arch?.n || 0)} of ${L.length + (p.arch?.n || 0)} tasks done`}>
     <div class="pbar" role="progressbar" aria-valuenow=${pct} aria-valuemin="0" aria-valuemax="100"><i style=${{ width: pct + '%' }}></i></div><b class="pct">${pct}%</b>
     ${end ? html`<span>Ends <b class=${late ? 'late' : ''}>${day(end)}</b></span>` : L.every(t => t.status === 'done') ? html`<span>Done</span>` : ''}
     ${tgt && html`<span class="hint">Target ${SH(tgt)}</span>`}</div>`;
 }
 
+// the board's archive: a folded last column; drop a card on it (or Archive all in Done) to put it away. Unfolded, a plain
+// list of what was archived, newest first; ↺ brings one back to Done. Done tasks go there by themselves too (project setting).
+function Archive({ p, tasks, over, setOver, arch, setArch }) {
+  const open = !!arch?.open, [list, setList] = useState(null);
+  useEffect(() => { if (open) api(`/api/projects/${p.id}/archive`).then(setList).catch(e => toast(e.message)); }, [open, arch?.v, p.id]);
+  const drop = async e => {
+    e.preventDefault(); setOver(-1);
+    const t = tasks.find(x => x.id === +e.dataTransfer.getData('text/plain')); if (!t) return;
+    try { if (t.status !== 'done') await post(`/api/tasks/${t.id}/done`, { done: true }); await post(`/api/tasks/${t.id}/archive`, { archived: true }); await load(['tasks', 'plan', 'projects']); setArch(a => ({ open: !!a?.open, v: (a?.v || 0) + 1 })); }
+    catch (x) { toast(x.message); }
+  };
+  const restore = async x => { try { await post(`/api/tasks/${x.id}/archive`, { archived: false }); await load(['tasks', 'projects']); setArch(a => ({ ...a, v: a.v + 1 })); } catch (e) { toast(e.message); } };
+  return html`<div class=${'colm arch' + (open ? ' open' : '') + (over ? ' over' : '')} onDragOver=${e => { e.preventDefault(); setOver('a'); }} onDragLeave=${() => setOver(-1)} onDrop=${drop}>
+    <h4><button class="archt" onClick=${() => setArch(a => ({ open: !a?.open, v: a?.v || 0 }))}>${I(open ? 'left' : 'right', 14)}Archive</button>${open && list && html`<span>${list.length}</span>`}</h4>
+    ${open && html`<ul class="alist">${(list || []).map(x => html`<li key=${x.id}><span class="at" onClick=${() => openTask(x.id)}>${x.title}</span><span class="hint">${x.done_at ? SH(x.done_at) : ''}</span>
+      <button class="icon" title="Back to Done" onClick=${() => restore(x)}>${I('repeat', 13)}</button></li>`)}${list && !list.length && html`<li class="hint">Empty</li>`}</ul>`}
+  </div>`;
+}
 export default function ProjectView({ id }) {
   const st = S.state, p = st.projects.find(x => x.id === +id);
-  const [feed, setFeed] = useState(null), [over, setOver] = useState(-1);
+  const [feed, setFeed] = useState(null), [over, setOver] = useState(-1), [arch, setArch] = useState(null);   // arch: { open, v } (v: reload)
   useEffect(() => { if (feed) api('/api/activity?project=' + id).then(setFeed).catch(() => {}); }, [st.tasks]);
   const [view, setView] = useState(() => { try { return localStorage.getItem('pv-' + id) || 'overview'; } catch { return 'overview'; } });
   if (!p) return html`<div class="empty">Project not found.</div>`;
@@ -143,9 +163,9 @@ export default function ProjectView({ id }) {
     </div>
     ${feed && html`<div class="box" style="margin:10px 16px 0;max-height:200px;overflow:auto"><ul class="feed">${feed.map(a => html`<li><time>${when(a.at)}</time><b>${a.user_name || ''}</b> <span>${a.text}</span></li>`)}</ul></div>`}
     <div class="board">${cols.map((c, ci) => html`<div class=${'colm' + (over === ci ? ' over' : '')} onDragOver=${e => { e.preventDefault(); setOver(ci); }} onDragLeave=${() => setOver(-1)} onDrop=${e => drop(e, ci)}>
-      <h4>${c} <span>${byCol[ci].length}</span></h4>
+      <h4>${c} <span>${byCol[ci].length}</span>${ci === cols.length - 1 && byCol[ci].some(t => !t.recur) && html`<button class="icon archall" title="Archive all done" onClick=${async () => { try { const r = await post(`/api/projects/${p.id}/archive-done`); await load(['tasks', 'projects']); setArch(a => a && { ...a, v: a.v + 1 }); toast(`${r.n} archived`); } catch (x) { toast(x.message); } }}>${I('download', 15)}</button>`}</h4>
       <div class="cards">${byCol[ci].map(t => html`<${Card} key=${t.id} t=${t} cols=${cols.length} onDragStart=${onDragStart}/>`)}</div>
       ${ci < cols.length - 1 && html`<button class="addc" onClick=${() => openTask('new', { project_id: p.id, col: ci })}>${I('plus', 15)}Add</button>`}
-    </div>`)}</div>
+    </div>`)}<${Archive} p=${p} tasks=${tasks} over=${over === 'a'} setOver=${setOver} arch=${arch} setArch=${setArch}/></div>
   </div>`;
 }

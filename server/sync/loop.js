@@ -17,6 +17,7 @@ import { notifyUsers } from '../bus.js';
 import { notifyTick, notify } from '../notify.js';
 import { clashTick, checkClashes } from '../conflicts.js';
 import { trackedEnds } from '../eventdone.js';
+import { archiveTick } from '../actions.js';
 import { onTaskDone, onTaskStart, settleAllPaused } from '../actions.js';
 import { membersOf, settingsOf } from '../models.js';
 import { syslog } from '../logs.js';
@@ -128,6 +129,7 @@ async function tick() {
     await trackedEnds().catch(e => console.warn('tracked', e.message));   // a tracked appointment's longer end, also in Google
     if (due('notify', 55)) await notifyTick().catch(e => console.warn('notify', e.message));
     if (due('clash', 55)) await clashTick().catch(e => console.warn('clash', e.message));
+    if (due('archive', 3600)) { try { archiveTick(); } catch (e) { console.warn('archive', e.message); } }   // done tasks into the archive (project setting)
     if (due('travel', 600)) travelTick().catch(e => console.warn('travel', e.message));   // new places of the next two weeks: their way from home
   } finally { ticking = false; }
 }

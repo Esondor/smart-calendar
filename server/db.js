@@ -391,6 +391,9 @@ const MIGRATIONS = [
   ALTER TABLE plan_events ADD COLUMN kept INTEGER NOT NULL DEFAULT 0;   -- a block that was worked on: stays in the calendar as the log (✓), cut to what was worked
   ALTER TABLE event_track ADD COLUMN orig_end INTEGER;                   -- the appointment's end before it was tracked past it (Google shows the longer end)
   `,
+  `
+  ALTER TABLE tasks ADD COLUMN archived_at INTEGER;     -- done and put away: no longer in Done, only in the board's Archive
+  `,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

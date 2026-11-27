@@ -291,7 +291,7 @@ export default async function apiRoutes(app) {
     if (!ids.length) return [];
     const since = Date.now() - 30 * 864e5;
     const rows = all(`SELECT t.* FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.project_id IN (${ids.map(() => '?').join(',')})
-      AND (t.status != 'done' OR t.done_at > ? OR p.kind = 'outline' OR ? = 1) ORDER BY t.project_id, t.grp, t.sort, t.id`, ...ids, since, req.query.project ? 1 : 0);
+      AND t.archived_at IS NULL AND (t.status != 'done' OR t.done_at > ? OR p.kind = 'outline' OR ? = 1) ORDER BY t.project_id, t.grp, t.sort, t.id`, ...ids, since, req.query.project ? 1 : 0);
     const plans = new Map();
     return rows.map(r => taskOut(taskRow(r), plans));
   });
@@ -334,6 +334,12 @@ export default async function apiRoutes(app) {
     return { ok: true, undo };
   });
   app.post('/api/tasks/:id/done', async req => { const t = needTask(req.user.id, req.params.id); return taskOut(A.setDone(req.user.id, t.id, int(req.body?.period, 0), req.body?.done !== false), new Map()); });
+  app.post('/api/tasks/:id/archive', async req => { const t = needTask(req.user.id, req.params.id); if (!A.archiveTask(req.user.id, t.id, req.body?.archived !== false)) throw httpErr(400, 'Only done tasks go to the archive'); return { ok: true }; });
+  app.post('/api/projects/:id/archive-done', async req => { const pid = needProject(req.user.id, req.params.id); return { ok: true, n: A.archiveDone(req.user.id, pid) }; });
+  app.get('/api/projects/:id/archive', async req => {
+    const pid = needProject(req.user.id, req.params.id);
+    return all(`SELECT t.id, t.title, t.done_at, t.archived_at, u.name AS done_by FROM tasks t LEFT JOIN users u ON u.id = t.done_by WHERE t.project_id = ? AND t.archived_at IS NOT NULL ORDER BY t.archived_at DESC, t.done_at DESC LIMIT 300`, pid);
+  });
   app.post('/api/tasks/restore', async req => {   // undo a delete, within an hour
     const id = A.restoreTask(req.user.id, String(req.body?.token || '')); if (!id) throw httpErr(404, 'Can no longer be undone'); return { ok: true, id };
   });
