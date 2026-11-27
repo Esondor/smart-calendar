@@ -1092,5 +1092,8 @@ aside.files .fhead b{white-space:nowrap}
 .appt .dt{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .appt .dt input[type=date]{min-width:0;flex:1 1 120px}
 .stepper{display:inline-flex;align-items:center;gap:10px}
-.stepper button{width:30px;height:30px;border-radius:50%;border:0;background:var(--fill);color:var(--ink);font-size:18px;line-height:1;cursor:pointer;padding:0}
+.stepper button{position:relative;width:30px;height:30px;border-radius:50%;border:0;background:var(--fill);cursor:pointer;padding:0;flex:none}
+.stepper button::before,.stepper button.pl::after{content:"";position:absolute;left:50%;top:50%;width:12px;height:2px;margin:-1px 0 0 -6px;border-radius:1px;background:var(--ink)}
+.stepper button.pl::after{transform:rotate(90deg)}
 .stepper b{min-width:64px;text-align:center;font-weight:600}
+.tedit .box{margin:14px 0}

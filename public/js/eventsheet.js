@@ -183,7 +183,7 @@ export async function openEventSheet(ev) {
 const PRIS = [[3, 'Low'], [2, 'Medium'], [1, 'High'], [0, 'ASAP']];
 // two choices: a switch that slides from the left one to the right one
 export const Switch2 = ({ a, b, right, set }) => html`<button type="button" class=${'sw2' + (right ? ' r' : '')} onClick=${() => set(!right)}><span>${a}</span><span>${b}</span></button>`;
-const DateTime = ({ d, t, setD, setT, empty }) => html`<div class="dt"><input type="date" value=${d} onInput=${e => setD(e.target.value)}/>${!empty && html`<input class="t24" value=${t} placeholder="--:--" onChange=${e => setT(n24(e.target.value) || '')}/>`}</div>`;
+export const DateTime = ({ d, t, setD, setT, empty }) => html`<div class="dt"><input type="date" value=${d} onInput=${e => setD(e.target.value)}/>${!empty && html`<input class="t24" value=${t} placeholder="--:--" onChange=${e => setT(n24(e.target.value) || '')}/>`}</div>`;
 export async function newAppointment(at = null) {
   const cals = googleCals(), names = Object.keys(S.state.settings?.hours || { work: 1, personal: 1 });
   const t0 = at || Math.ceil(Date.now() / 300000) * 300000;
@@ -208,7 +208,7 @@ export async function newAppointment(at = null) {
           <label class="cell"><span>All day</span><input type="checkbox" checked=${f.all_day} onChange=${x => set({ all_day: x.target.checked, block: !x.target.checked, ed: x.target.checked ? f.sd : f.ed })}/></label>
           <label class="cell"><span>Blocks time</span><input type="checkbox" checked=${f.block} onChange=${x => set({ block: x.target.checked })}/></label>`
         : html`
-          <div class="cell"><span>Takes</span><span class="stepper"><button type="button" onClick=${() => step(-1)}>−</button><b>${dh(f.minutes)}</b><button type="button" onClick=${() => step(1)}>+</button></span></div>
+          <div class="cell"><span>Takes</span><span class="stepper"><button type="button" class="mn" title="Less" onClick=${() => step(-1)}></button><b>${dh(f.minutes)}</b><button type="button" class="pl" title="More" onClick=${() => step(1)}></button></span></div>
           <label class="cell"><span>Certain time window</span><input type="checkbox" checked=${f.win} onChange=${x => set({ win: x.target.checked })}/></label>
           ${f.win ? html`<div class="cell"><span>Between</span><span class="row" style="gap:6px;flex:none"><input class="t24" value=${f.ws} onChange=${x => set({ ws: n24(x.target.value) || f.ws })}/>–<input class="t24" value=${f.we} onChange=${x => set({ we: n24(x.target.value) || f.we })}/></span></div>
             <div class="cell"><div class="seg days">${WD.map(([d, l]) => html`<button type="button" class=${f.days.includes(d) ? 'on' : ''} onClick=${() => set({ days: f.days.includes(d) ? f.days.filter(x => x !== d) : [...f.days, d] })}>${l}</button>`)}</div></div>`

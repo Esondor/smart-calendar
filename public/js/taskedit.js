@@ -1,23 +1,13 @@
-import { html, useState, S, api, post, patch, del, load, toast, openModal, confirmDialog, when, dh, DN, PRI, projectById, SH, n24, priColor, fromIso } from './lib.js';
+import { html, useState, S, api, post, patch, del, load, toast, openModal, confirmDialog, when, dh, DN, PRI, projectById, SH, n24, priColor, fromIso, isoDate, hm } from './lib.js';
 import { I } from './icons.js';
 import { moveDialog } from './now.js';
-import { PlaceInput, googleCals } from './eventsheet.js';
+import { PlaceInput, googleCals, Switch2, atTime } from './eventsheet.js';
 let LOCS = null;
 
 const DURS = [15, 30, 45, 60, 90, 120, 180];
 const scheduleNames = () => Object.keys(S.state.settings?.hours || { work: 1, personal: 1 });
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
-// an appointment window, e.g. a practice open Mon–Fri 08:00–11:00: the task is planned in one piece inside it,
-// as soon as possible, next to another appointment or about an hour before closing (meals give way)
-function Window({ f, set }) {
-  const w = f.meta?.win, setW = x => set({ meta: { ...(f.meta || {}), win: x } });
-  const time = (k, ph) => html`<input class="t24" placeholder=${ph} value=${w?.[k] || ''} onChange=${e => {
-    const v = n24(e.target.value), nw = { days: w?.days || [1, 2, 3, 4, 5], s: w?.s || '', e: w?.e || '', [k]: v || '' };
-    setW(nw.s || nw.e ? nw : null); }}/>`;
-  return html`<div style="display:grid;gap:8px"><div class="row" style="gap:6px">${time('s', '08:00')}–${time('e', '11:00')}${w && html`<button type="button" class="icon" title="Remove" onClick=${() => setW(null)}>${I('x', 14)}</button>`}</div>
-    ${w && html`<div class="seg dows">${[1, 2, 3, 4, 5, 6, 0].map(d => html`<button type="button" class=${w.days.includes(d) ? 'on' : ''} onClick=${() => setW({ ...w, days: w.days.includes(d) ? w.days.filter(x => x !== d) : [...w.days, d] })}>${DN[d].slice(0, 2)}</button>`)}</div>`}</div>`;
-}
 export async function openTask(idOrNew, opts = {}) {
   let t = null;
   if (idOrNew && idOrNew !== 'new') {
@@ -32,10 +22,13 @@ export async function openTask(idOrNew, opts = {}) {
 function Editor({ task, opts, close }) {
   const st = S.state, isNew = !task;
   const defProject = opts.project_id || (st.projects.find(p => p.name === 'Inbox' && p.owner_id === st.me.id) || st.projects[0] || {}).id;
-  const [f, setF] = useState(() => task ? { ...task, recur: task.recur || null } : {
-    title: opts.title || '', project_id: defProject, duration: st.settings?.dFree || 60, priority: 2, deadline: '', start_after: '', assignee_id: st.me.id,
+  // start and due: a day and, if given, a time (kept in meta.from / meta.due); a new task starts now
+  const tOf = (d, ms) => d && +ms && isoDate(+ms) === d ? hm(+ms) : '';
+  const now5 = Math.ceil(Date.now() / 300000) * 300000;
+  const [f, setF] = useState(() => task ? { ...task, recur: task.recur || null, st: tOf(task.start_after, task.meta?.from), dt: tOf(task.deadline, task.meta?.due), win: !!task.meta?.win } : {
+    title: opts.title || '', project_id: defProject, duration: st.settings?.dFree || 60, priority: 2, deadline: '', start_after: isoDate(now5), st: hm(now5), dt: '', assignee_id: st.me.id, win: false,
     auto: true, schedule: null, recur: null, points: [], notes: '', min_chunk: null, assign_mode: 'fixed', parent_id: opts.parent_id || null, col: opts.col || 0, location: '', meta: {} });
-  const [busy, setBusy] = useState(false), [more, setMore] = useState(!!task?.meta?.followups?.length);
+  const [busy, setBusy] = useState(false);
   const set = p => setF(x => ({ ...x, ...p }));
   const proj = projectById(+f.project_id), members = proj?.members || [];
   const sch = task?.sched, r = f.recur;
@@ -51,7 +44,8 @@ function Editor({ task, opts, close }) {
       const body = { title: f.title, notes: f.notes, project_id: +f.project_id, duration: +f.duration, priority: +f.priority, deadline: f.deadline || null, start_after: f.start_after || null,
         assignee_id: f.assignee_id ? +f.assignee_id : null, auto: !!f.auto, schedule: f.schedule || null, recur: f.recur, points: f.points.filter(p => p.t.trim()), min_chunk: f.min_chunk || null,
         assign_mode: f.assign_mode, parent_id: f.parent_id, col: f.col, location: f.location || null,
-        meta: { ...(f.meta || {}), followups: (f.meta?.followups || []).filter(x => x.title?.trim()) } };
+        meta: { ...(f.meta || {}), followups: (f.meta?.followups || []).filter(x => x.title?.trim()),
+          from: f.start_after && f.st ? atTime(f.start_after, f.st) : undefined, due: f.deadline && f.dt ? atTime(f.deadline, f.dt) : undefined, win: f.win ? f.meta?.win || null : undefined } };
       if (LOCS && f.location && !LOCS.includes(f.location)) LOCS.push(f.location);
       const res = isNew ? await post('/api/tasks', body) : await patch('/api/tasks/' + task.id, body);
       await load(['tasks', 'plan']); close(res);
@@ -71,47 +65,38 @@ function Editor({ task, opts, close }) {
   return html`<div class="modal tedit" onKeyDown=${e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') save(); }}>
     <input class="ttl" placeholder="Title" value=${f.title} onInput=${e => set({ title: e.target.value })} onKeyDown=${e => { if (e.key === 'Enter' && isNew) save(); }}/>
     ${status}
-    <div class="grid">
-      <label>Project</label>
-      <select value=${f.project_id} onChange=${e => set({ project_id: +e.target.value, parent_id: null })}>${st.projects.filter(p => !p.archived).map(p => html`<option value=${p.id}>${p.name}</option>`)}</select>
-      <label>Duration</label>
-      <div class="row"><div class="seg">${DURS.map(d => html`<button type="button" class=${+f.duration === d ? 'on' : ''} onClick=${() => set({ duration: d })}>${d < 60 ? d + 'm' : d / 60 + 'h'}</button>`)}</div>
-        ${!DURS.includes(+f.duration) && html`<span class="hint">${dh(f.duration)}</span>`}</div>
-      <label>Priority</label>
-      <div class="seg">${[3, 2, 1, 0].map(i => html`<button type="button" class=${+f.priority === i ? 'on' : ''} style=${+f.priority === i ? { background: priColor(i), color: '#fff' } : null} onClick=${() => set({ priority: i })}>${PRI[i]}</button>`)}</div>
-      ${f.deadline && +f.priority > 0 && !(proj && (proj.meta?.ordered ?? proj.kind === 'outline')) && html`<div class="rise row" style="gap:6px;font-size:12px;color:var(--muted)"><i style=${{ display: 'inline-block', width: '44px', height: '6px', borderRadius: '3px', background: `linear-gradient(90deg,${priColor(+f.priority)},${priColor(0)})` }}></i>ASAP by ${DN[new Date(fromIso(f.deadline)).getDay()]} ${SH(fromIso(f.deadline))}</div>`}
-      <label>Location</label>
-      ${proj?.places ? html`<div class="seg">${proj.places.map(pl => html`<button type="button" class=${(f.location || '').toLowerCase() === pl.toLowerCase() ? 'on' : ''} onClick=${() => set({ location: pl })}>${pl}</button>`)}</div>` : S.state.maps ? html`<${PlaceInput} value=${f.location || ''} placeholder="None" onChange=${v => set({ location: v })} onTravel=${m => set({ meta: { ...(f.meta || {}), travel: m || undefined } })} travel=${f.meta?.travel || 0}/>`
-      : html`<div><input list="sc-locs" placeholder="None" value=${f.location || ''} onInput=${e => set({ location: e.target.value })} style="width:220px"/>
-        <datalist id="sc-locs">${(LOCS || []).map(l => html`<option value=${l}/>`)}</datalist></div>`}
-      <label>Due</label>
-      <div class="row"><input type="date" value=${f.deadline || ''} onInput=${e => set({ deadline: e.target.value })}/>${f.deadline && html`<button class="icon" title="Clear" onClick=${() => set({ deadline: '' })}>${I('x', 14)}</button>`}</div>
-      ${members.length > 1 && html`<label>Assignee</label>
-        <div class="row"><select value=${f.assignee_id || ''} onChange=${e => set({ assignee_id: +e.target.value || null })} disabled=${r && f.assign_mode === 'rotate'}>${members.map(m => html`<option value=${m.id}>${m.name}</option>`)}</select>
-          ${r && html`<label class="row" style="gap:6px"><input type="checkbox" class="sq" checked=${f.assign_mode === 'rotate'} onChange=${e => set({ assign_mode: e.target.checked ? 'rotate' : 'fixed' })}/>Take turns</label>`}</div>`}
-      <label>Repeat</label>
-      <div class="row">
+    <div class="box appt">
+      <div class="cell"><span>Project</span><select value=${f.project_id} onChange=${e => set({ project_id: +e.target.value, parent_id: null })}>${st.projects.filter(p => !p.archived).map(p => html`<option value=${p.id}>${p.name}</option>`)}</select></div>
+      <div class="cell two"><div><span class="lbl">Start</span><div class="dt"><input type="date" value=${f.start_after || ''} onInput=${e => set({ start_after: e.target.value })}/>${f.start_after && html`<input class="t24" value=${f.st} placeholder="--:--" onChange=${e => set({ st: n24(e.target.value) || '' })}/>`}</div></div>
+        <div><span class="lbl">Due</span><div class="dt"><input type="date" value=${f.deadline || ''} min=${f.start_after || ''} onInput=${e => set({ deadline: e.target.value })}/>${f.deadline && html`<input class="t24" value=${f.dt} placeholder="--:--" onChange=${e => set({ dt: n24(e.target.value) || '' })}/><button type="button" class="icon" title="No due date" onClick=${() => set({ deadline: '', dt: '' })}>${I('x', 14)}</button>`}</div></div></div>
+      <div class="cell"><span>Takes</span><span class="stepper"><button type="button" class="mn" title="Less" onClick=${() => set({ duration: Math.max(5, +f.duration - (+f.duration > 15 ? 15 : 5)) })}></button><b>${dh(+f.duration)}</b><button type="button" class="pl" title="More" onClick=${() => set({ duration: Math.min(24 * 60, +f.duration + 15) })}></button></span></div>
+      <label class="cell"><span>Certain time window</span><input type="checkbox" checked=${f.win} onChange=${e => set({ win: e.target.checked, meta: { ...(f.meta || {}), win: e.target.checked ? f.meta?.win || { days: [1, 2, 3, 4, 5], s: '08:00', e: '11:00' } : null } })}/></label>
+      ${f.win && f.meta?.win ? html`<div class="cell"><span>Between</span><span class="row" style="gap:6px;flex:none">${['s', 'e'].map((k, n) => html`${n ? '–' : ''}<input class="t24" value=${f.meta.win[k]} onChange=${e => set({ meta: { ...f.meta, win: { ...f.meta.win, [k]: n24(e.target.value) || f.meta.win[k] } } })}/>`)}</span></div>
+        <div class="cell"><div class="seg days">${[1, 2, 3, 4, 5, 6, 0].map(d => html`<button type="button" class=${f.meta.win.days.includes(d) ? 'on' : ''} onClick=${() => set({ meta: { ...f.meta, win: { ...f.meta.win, days: f.meta.win.days.includes(d) ? f.meta.win.days.filter(x => x !== d) : [...f.meta.win.days, d] } } })}>${DN[d].slice(0, 2)}</button>`)}</div></div>`
+      : (() => { const names = scheduleNames(), cur = f.schedule || proj?.schedule || 'work';
+          return html`<div class="cell"><span>In</span>${names.length === 2 ? html`<${Switch2} a=${cap(names[0])} b=${cap(names[1])} right=${cur === names[1]} set=${v => set({ schedule: names[v ? 1 : 0] })}/>`
+            : html`<div class="seg ch">${names.map(n => html`<button type="button" class=${cur === n ? 'on' : ''} onClick=${() => set({ schedule: n })}>${cap(n)}</button>`)}</div>`}</div>`; })()}
+      ${(() => { const ord = proj && (proj.meta?.ordered ?? proj.kind === 'outline');
+        return html`<div class="cell ncell"><span>Priority</span><div class="seg ch pri">${[3, 2, 1, 0].map(i => html`<button type="button" class=${+f.priority === i ? 'on' : ''} style=${+f.priority === i ? { background: priColor(i), color: '#fff' } : null} onClick=${() => set({ priority: i })}>${PRI[i]}</button>`)}</div></div>
+        ${f.deadline && +f.priority > 0 && !ord && html`<div class="cell rise"><span></span><span class="row" style="gap:6px"><i style=${{ background: `linear-gradient(90deg,${priColor(+f.priority)},${priColor(0)})` }}></i>ASAP by ${DN[new Date(fromIso(f.deadline)).getDay()]} ${SH(fromIso(f.deadline))}${f.dt ? ', ' + f.dt : ''}</span></div>`}`; })()}
+      <div class="cell"><span>Repeat</span><span class="row" style="gap:6px;flex:none">
         <select value=${r ? r.freq : ''} onChange=${e => e.target.value ? setR({ freq: e.target.value }) : set({ recur: null })}>
           <option value="">Never</option><option value="day">Daily</option><option value="week">Weekly</option><option value="month">Monthly</option></select>
         ${r && html`<span class="hint">every</span><input type="number" min="1" max="52" value=${r.every || 1} style="width:56px" onInput=${e => setR({ every: +e.target.value || 1 })}/>
-          <span class="hint">${{ day: 'days', week: 'weeks', month: 'months' }[r.freq]}</span>`}
-      </div>
-      ${r && html`<label>On</label>
-        <div class="row"><div class="seg dows">${[1, 2, 3, 4, 5, 6, 0].map(d => html`<button type="button" class=${(r.days || []).includes(d) ? 'on' : ''} onClick=${() => setR({ days: (r.days || []).includes(d) ? r.days.filter(x => x !== d) : [...(r.days || []), d] })}>${DN[d].slice(0, 2)}</button>`)}</div>
+          <span class="hint">${{ day: 'days', week: 'weeks', month: 'months' }[r.freq]}</span>`}</span></div>
+      ${r && html`<div class="cell"><div class="seg dows">${[1, 2, 3, 4, 5, 6, 0].map(d => html`<button type="button" class=${(r.days || []).includes(d) ? 'on' : ''} onClick=${() => setR({ days: (r.days || []).includes(d) ? r.days.filter(x => x !== d) : [...(r.days || []), d] })}>${DN[d].slice(0, 2)}</button>`)}</div>
           <select value=${r.window || 'any'} onChange=${e => setR({ window: e.target.value })}><option value="any">Any time</option><option value="morning">Morning</option><option value="afternoon">Afternoon</option><option value="evening">Evening</option></select></div>`}
-      ${more && html`
-        <label>Start after</label><input type="date" value=${f.start_after || ''} onInput=${e => set({ start_after: e.target.value })}/>
-        <label>Between</label><${Window} f=${f} set=${set}/>
-        ${googleCals().length > 0 && html`<label>Calendar</label><select value=${f.meta?.calendarId || ''} onChange=${e => set({ meta: { ...(f.meta || {}), calendarId: +e.target.value || undefined } })}>
-          <option value="">Project calendar</option>${googleCals().map(c => html`<option value=${c.id}>${c.name}</option>`)}</select>`}
-        <label>Hours</label>
-        <select value=${f.schedule || ''} onChange=${e => set({ schedule: e.target.value || null })}>
-          <option value="">${cap(proj?.schedule || 'work')} (project)</option>${scheduleNames().map(n => html`<option value=${n}>${cap(n)}</option>`)}</select>
-        <label>Min. block</label><div class="row"><input type="number" min="5" step="5" placeholder=${S.state.settings?.chunk || 30} value=${f.min_chunk || ''} style="width:76px" onInput=${e => set({ min_chunk: +e.target.value || null })}/><span class="hint">min</span></div>
-        <label>Schedule</label><label class="row" style="gap:8px"><input type="checkbox" class="sq" checked=${f.auto} onChange=${e => set({ auto: e.target.checked })}/>Automatically</label>
-        <label style="align-self:start;padding-top:8px">Then</label><${Followups} f=${f} set=${set}/>`}
+      ${members.length > 1 && html`<div class="cell"><span>Assignee</span><span class="row" style="gap:8px;flex:none"><select value=${f.assignee_id || ''} onChange=${e => set({ assignee_id: +e.target.value || null })} disabled=${r && f.assign_mode === 'rotate'}>${members.map(m => html`<option value=${m.id}>${m.name}</option>`)}</select>
+          ${r && html`<label class="row" style="gap:6px"><input type="checkbox" class="sq" checked=${f.assign_mode === 'rotate'} onChange=${e => set({ assign_mode: e.target.checked ? 'rotate' : 'fixed' })}/>Take turns</label>`}</span></div>`}
+      <div class="cell"><span>Place</span>${proj?.places ? html`<div class="seg">${proj.places.map(pl => html`<button type="button" class=${(f.location || '').toLowerCase() === pl.toLowerCase() ? 'on' : ''} onClick=${() => set({ location: pl })}>${pl}</button>`)}</div>`
+        : S.state.maps ? html`<${PlaceInput} value=${f.location || ''} placeholder="None" onChange=${v => set({ location: v })}/>`
+        : html`<span><input list="sc-locs" placeholder="None" value=${f.location || ''} onInput=${e => set({ location: e.target.value })} style="width:200px"/><datalist id="sc-locs">${(LOCS || []).map(l => html`<option value=${l}/>`)}</datalist></span>`}</div>
+      ${googleCals().length > 0 && html`<div class="cell"><span>Calendar</span><select value=${f.meta?.calendarId || ''} onChange=${e => set({ meta: { ...(f.meta || {}), calendarId: +e.target.value || undefined } })}>
+          <option value="">Project calendar</option>${googleCals().map(c => html`<option value=${c.id}>${c.name}</option>`)}</select></div>`}
+      <label class="cell"><span>Plan automatically</span><input type="checkbox" checked=${f.auto} onChange=${e => set({ auto: e.target.checked })}/></label>
+      <div class="cell"><span>Smallest block</span><span class="row" style="gap:6px;flex:none"><input type="number" min="5" step="5" placeholder=${S.state.settings?.chunk || 30} value=${f.min_chunk || ''} style="width:76px" onInput=${e => set({ min_chunk: +e.target.value || null })}/><span class="hint">min</span></span></div>
+      <div class="cell" style="align-items:start"><span style="padding-top:8px">Then</span><${Followups} f=${f} set=${set}/></div>
     </div>
-    ${!more && html`<button class="ghost" style="margin:-6px 0 8px" onClick=${() => setMore(true)}>More Options</button>`}
     <ul class="pts">${f.points.map((p, i) => html`<li class=${p.done ? 'ok' : ''}><input type="checkbox" checked=${p.done} onChange=${e => set({ points: f.points.map((q, j) => j === i ? { ...q, done: e.target.checked } : q) })}/>
       <input type="text" value=${p.t} onInput=${e => set({ points: f.points.map((q, j) => j === i ? { ...q, t: e.target.value } : q) })}/>
       <button class="sk" onClick=${() => set({ points: f.points.filter((q, j) => j !== i) })}>${I('x', 14)}</button></li>`)}
