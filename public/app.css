@@ -1121,3 +1121,8 @@ button.pri.off{opacity:.45}
 .cell.bad>span:first-child,.cell.bad .lbl{color:var(--late)}
 .bad{animation:shake .32s}
 @keyframes shake{20%,60%{transform:translateX(-4px)}40%,80%{transform:translateX(4px)}}
+/* iOS Safari gives date fields a fixed least width: without its own look they fit their column */
+.appt .cell.two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.appt .dt input[type=date]{-webkit-appearance:none;appearance:none;display:block;min-width:0;max-width:100%;box-sizing:border-box}
+.appt .dt input[type=date]::-webkit-date-and-time-value{text-align:center;min-width:0}
+.appt .dt input[type=date]::-webkit-calendar-picker-indicator{margin-left:2px}
