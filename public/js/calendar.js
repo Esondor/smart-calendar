@@ -2,7 +2,7 @@ import { html, useState, useEffect, useLayoutEffect, useRef, S, api, post, patch
 import { openTask } from './taskedit.js';
 import { I } from './icons.js';
 import { blockTime } from './now.js';
-import { openEventSheet, EventFields, googleCals, atTime, AlsoDots } from './eventsheet.js';
+import { openEventSheet, EventFields, googleCals, atTime, AlsoDots, newFlexible } from './eventsheet.js';
 
 const H0 = 0, H1 = 24;   // the whole day, 00:00 to 24:00
 const WIN = 63, SHIFT = 28;            // day strip: 9 weeks rendered, moved by 4 weeks near an edge
@@ -21,6 +21,19 @@ function lanes(items) {   // side-by-side layout for overlapping items
   const flush = () => { const cols = []; cluster.forEach(it => { let c = cols.findIndex(e => e <= it.s); if (c < 0) { c = cols.length; cols.push(0); } cols[c] = it.e; it.lane = c; }); cluster.forEach(it => it.lanes = cols.length); cluster = []; };
   items.forEach(it => { if (it.s >= end && cluster.length) flush(); cluster.push(it); end = Math.max(end, it.e); });
   flush(); return items;
+}
+// New: the same choices from the + button and from an empty spot in the calendar (there: at the time clicked)
+export async function newMenu({ at = null, project_id } = {}) {
+  const v = await openModal(close => html`<div class="modal sm"><h3>${at ? `${DN[new Date(at).getDay()]} ${SH(at)}, ${hm(at)}` : 'New'}</h3><div class="menu">
+    <button onClick=${() => close('task')}>${I('list')}Task</button>
+    ${googleCals().length > 0 && html`<button onClick=${() => close('event')}>${I('calendar')}Appointment</button>`}
+    <button onClick=${() => close('flex')}>${I('clock')}Flexible Appointment</button>
+    <button onClick=${() => close('break')}>${I('cup')}Break / Block Time</button></div>
+    <div class="acts"><button onClick=${() => close(null)}>Cancel</button></div></div>`);
+  if (v === 'task') { const t = await openTask('new', project_id ? { project_id } : {}); if (at && t?.id) { await post(`/api/tasks/${t.id}/pin`, { period: t.period || 0, s: at, e: at + (t.duration || 30) * 60000 }); load(['plan']); } }
+  if (v === 'event') newEvent(at || undefined);
+  if (v === 'flex') newFlexible(at);
+  if (v === 'break') blockTime(at);
 }
 export async function newEvent(ms) {
   const cals = googleCals(); if (!cals.length) return toast('Connect Google to add events');
@@ -222,7 +235,7 @@ export default function CalendarView() {
       const x = { kind: 'event', ev: e, s: Math.max(e.start - e.before * 60000, d0), e: Math.min(e.end + e.after * 60000, d1), s0: Math.max(e.start, d0), e0: Math.min(e.end, d1), t: e.title, cal: e.cal, free: !e.blocks, color: e.color };
       (collapse && (!e.blocks || e.hidden) ? mini : out).push(x);
     });
-    plan.busy.filter(b => b.e > d0 && b.s < d1).forEach(b => out.push({ kind: b.kind === 'fixed' || b.kind === 'break' ? 'fixed' : 'appt', s: Math.max(b.s, d0), e: Math.min(b.e, d1), t: b.t, id: b.id }));   // breaks look like Lunch
+    plan.busy.filter(b => b.e > d0 && b.s < d1).forEach(b => out.push({ kind: b.kind === 'fixed' || b.kind === 'break' ? 'fixed' : 'appt', s: Math.max(b.s, d0), e: Math.min(b.e, d1), t: b.t, id: b.id, busy: b }));   // breaks look like Lunch
     plan.blocks.map(b => { const p = pendFor(b); return p ? { ...b, s: p.s, e: p.e, srv: b.s, pinned: true } : b; })
       .filter(b => b.e > d0 && b.s < d1).forEach(b => { const u = plan.units[b.key]; if (u) out.push({ kind: 'block', s: b.s, e: b.e, b, u }); });
     // done and tracked: kept as it happened (timer sessions; a task ticked off without one, as the quarter hour before)
@@ -304,10 +317,10 @@ export default function CalendarView() {
   async function onUp() {
     listen(false);
     const g = drag.current; drag.current = null; if (!g) return;
-    const isEv = g.it.kind === 'event';
-    if (g.tap) return who !== st.me.id ? (isEv ? null : openTask(g.it.u.taskId)) : isEv && !g.it.ev.editable ? eventSheet(g.it.ev) : setSel(selKey(g.it));
+    const isEv = g.it.kind === 'event', isBusy = g.it.kind === 'busy';
+    if (g.tap) return who !== st.me.id ? (isEv || isBusy ? null : openTask(g.it.u.taskId)) : isEv && !g.it.ev.editable ? eventSheet(g.it.ev) : setSel(selKey(g.it));
     const el = elOf(g);
-    if (!g.moved) { unpaint(el); setSel(null); return isEv ? eventSheet(g.it.ev) : blockSheet(g.it); }
+    if (!g.moved) { unpaint(el); setSel(null); return isEv ? eventSheet(g.it.ev) : isBusy ? busySheet(g.it.bu) : blockSheet(g.it); }
     const k = g.mode === 'move' ? g.dm * 60000 + g.dd * 864e5 : g.dm * 60000;
     if (!k) return unpaint(el);
     const s = g.mode === 'end' ? g.it.s : g.it.s + k, e = g.mode === 'start' ? g.it.e : g.it.e + k;
@@ -318,8 +331,30 @@ export default function CalendarView() {
       try { await patch('/api/events/' + ev.id, { start: s, end: e }); await load(['plan']); } catch (err) { toast(err.message); }
       return unpaint(elOf(g));
     }
+    if (isBusy) { setSel(null); await saveBusy(g.it.bu, { s, e }); return unpaint(elOf(g)); }
     unpaint(el); place(g.it, s, e);
   }
+  // a break, blocked time or one day of a fixed break (Lunch, …): moved, changed or removed here; a fixed one only on that day
+  const saveBusy = async (bu, { s, e, t, remove }) => {
+    try {
+      if (bu.id) await (remove ? api('/api/appts/' + bu.id, { method: 'DELETE', body: {} }) : patch('/api/appts/' + bu.id, { start: s, end: e, title: t || undefined }));
+      else await post(`/api/fixed/${bu.fixedId}/day`, { date: isoDate(bu.s), start: s, end: e, title: t || bu.t, remove: !!remove });
+      await load(['plan']);
+    } catch (err) { toast(err.message); }
+  };
+  const busySheet = async bu => {
+    const r = await openModal(close => { const B = () => {
+      const [d, setD] = useState(isoDate(bu.s)), [s, setS] = useState(hm(bu.s)), [e, setE] = useState(hm(bu.e)), [t, setT] = useState(bu.t);
+      return html`<div class="modal sm"><h3>${bu.t}</h3>
+        <div class="row"><input type="date" value=${d} onInput=${x => setD(x.target.value)}/><input class="t24" value=${s} onChange=${x => setS(n24(x.target.value) || s)}/>–<input class="t24" value=${e} onChange=${x => setE(n24(x.target.value) || e)}/></div>
+        <input type="text" style="width:100%;margin-top:8px" placeholder="Title" value=${t} onInput=${x => setT(x.target.value)}/>
+        <div class="acts"><button class="danger" onClick=${() => close({ remove: true })}>${bu.id ? 'Remove' : 'Skip This Day'}</button><span style="flex:1"></span><button onClick=${() => close(null)}>Cancel</button><button class="pri" onClick=${() => close({ d, s, e, t })}>Save</button></div></div>`; }; return html`<${B}/>`; });
+    if (!r) return;
+    if (r.remove) return saveBusy(bu, { remove: true });
+    const base = fromIso(r.d), toMs = x => base + (+x.slice(0, 2) * 60 + +x.slice(3)) * 60000;
+    if (toMs(r.e) <= toMs(r.s)) return toast('End must be after start');
+    saveBusy(bu, { s: toMs(r.s), e: toMs(r.e), t: r.t.trim() });
+  };
   const moved = it => (plan?.moved || []).some(m => m.task_id === it.u.taskId && m.period === (it.u.period || 0));
   const blockSheet = async it => {
     if (!it.b.pinned && !moved(it)) return openTask(it.u.taskId);
@@ -334,12 +369,7 @@ export default function CalendarView() {
     if (e.target !== e.currentTarget) return;
     if (sel) return setSel(null);
     const y = e.clientY - e.currentTarget.getBoundingClientRect().top, ms = d0 + Math.floor((y / hh + H0) * 4) * 900000;
-    const v = await openModal(close => html`<div class="modal sm"><h3>${DN[new Date(ms).getDay()]} ${SH(ms)}, ${hm(ms)}</h3>
-      <div class="menu"><button onClick=${() => close('task')}>${I('plus')}New Task</button>${googleCals().length > 0 && html`<button onClick=${() => close('event')}>${I('calendar')}New Event</button>`}<button onClick=${() => close('block')}>${I('block')}Block Time</button><button onClick=${() => close('break')}>${I('cup')}Break</button></div>
-      <div class="acts"><button onClick=${() => close(null)}>Cancel</button></div></div>`);
-    if (v === 'block' || v === 'break') blockTime(ms, v === 'break');
-    if (v === 'event') newEvent(ms);
-    if (v === 'task') { const t = await openTask('new'); if (t?.id) { await post(`/api/tasks/${t.id}/pin`, { period: t.period || 0, s: ms, e: ms + (t.duration || 30) * 60000 }); load(['plan']); } }
+    newMenu({ at: ms });
   };
 
   const nowMs = Date.now(), t0 = startOfDay(nowMs);
@@ -371,9 +401,10 @@ export default function CalendarView() {
                 <span class="et"><span class="kind">${I(ev.done ? 'check' : 'pin', 12)}</span>${x.t}<${AlsoDots} ev=${ev}/></span><span class="em">${hm(ev.start)}–${hm(ev.end)} · ${x.cal}</span>${ev.editable && html`<div class="rs rs-top"></div><div class="rs"></div>`}</div>`; })()}
             ${x.e > x.e0 && html`<div class="ev buf a" style=${{ ...part(x.e0, x.e), ...bc }} onClick=${open} title=${ev.travel?.home ? `Home: ${dh(ev.travel.min)} by ${ev.travel.mode}` : dh(ev.after) + ' after'}>${(x.e - x.e0) / 3600e3 * hh > 14 ? html`${ev.travel?.home ? html`<span class="way">${I(ev.travel.mode, 11)}</span>` : ''}${dh(ev.after)}` : ''}</div>`}`;
         }
-        return html`<div class=${'ev ' + x.kind + (x.id ? ' rm' : '')} style=${style} title=${x.t}
-          onClick=${x.id ? async () => { if (await confirmDialog(`Remove “${x.t}”?`, 'Remove', true)) { await api('/api/appts/' + x.id, { method: 'DELETE', body: {} }); load(['plan']); } } : null}>
-          <span class="et">${x.t}</span><span class="em">${hm(x.s)}–${hm(x.e)}</span></div>`;
+        const bu = x.busy, it = { kind: 'busy', bu, s: bu.s, e: bu.e, t: x.t, b: { key: bu.id ? 'a' + bu.id : 'f' + bu.bid, s: bu.s } }, edit = !!(bu.id || bu.fixedId);
+        return html`<div class=${'ev ' + x.kind + (edit ? ' rm' : '') + (sel === selKey(it) ? ' sel' : '')} style=${style} title=${x.t}
+          data-k=${selKey(it)} onPointerDown=${edit ? e => onDown(e, it) : null}>
+          <span class="et">${x.t}</span><span class="em">${hm(x.s)}–${hm(x.e)}</span>${edit && html`<div class="rs rs-top"></div><div class="rs"></div>`}</div>`;
       })}
       ${mini.map(x => html`<div class="ev mini" style=${{ top: top(x.s0) + 'px', height: Math.max(6, (x.e0 - x.s0) / 3600e3 * hh - 2) + 'px', '--c': x.color || 'var(--faint)' }} title=${`${x.t}\n${hm(x.ev.start)}–${hm(x.ev.end)} · ${x.cal}`} onClick=${() => eventSheet(x.ev)}></div>`)}
       ${d0 === t0 && html`<div class="nowl" style=${{ top: top(nowMs) + 'px' }}></div>`}

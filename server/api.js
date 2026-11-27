@@ -543,6 +543,19 @@ export default async function apiRoutes(app) {
     const brk = b.kind === 'break';   // a break you schedule: shown like Lunch, not written to the calendar
     return { id: A.addAppt(req.user.id, s, e, str(b.title || (brk ? 'Break' : 'Blocked'), 120), brk ? 'break' : 'appt') };
   });
+  app.patch('/api/appts/:id', async req => {
+    const b = req.body || {}, a = get(`SELECT * FROM appts WHERE id = ? AND user_id = ? AND kind != 'skipfixed'`, +req.params.id, req.user.id); if (!a) throw httpErr(404, 'Not found');
+    const s = b.start != null ? int(b.start) : a.start, e = b.end != null ? int(b.end) : a.end;
+    if (!(s && e > s)) throw httpErr(400, 'End must be after start');
+    run('UPDATE appts SET start = ?, end = ?, title = ? WHERE id = ?', s, e, b.title ? str(b.title, 120) : a.title, a.id); markDirty(req.user.id); return { ok: true };
+  });
+  app.post('/api/fixed/:id/day', async req => {
+    const b = req.body || {}, date = String(b.date || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw httpErr(400, 'Invalid date');
+    const s = int(b.start), e = int(b.end); if (!b.remove && !(s && e > s)) throw httpErr(400, 'End must be after start');
+    const id = A.fixedOnDay(req.user.id, req.params.id, date, { start: s, end: e, title: b.title ? str(b.title, 120) : null, remove: !!b.remove });
+    if (id === null && !b.remove) throw httpErr(404, 'Not found');
+    return { ok: true, id };
+  });
   app.delete('/api/appts/:id', async req => { run('DELETE FROM appts WHERE id = ? AND user_id = ?', +req.params.id, req.user.id); markDirty(req.user.id); return { ok: true }; });
   // minutes today and this week: everything (timer sessions and the appointments you had, overlaps counted once)
   // and the focus project alone (its sessions): your newest outline project

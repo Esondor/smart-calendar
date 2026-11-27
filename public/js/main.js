@@ -1,7 +1,6 @@
 import { html, render, useState, useEffect, useRef, S, useStore, api, post, load, connectStream, toast, Avatar, openModal, go } from './lib.js';
 import NowView, { NowStats } from './now.js';
-import CalendarView, { newEvent } from './calendar.js';
-import { newFlexible } from './eventsheet.js';
+import CalendarView, { newMenu } from './calendar.js';
 import TasksView from './tasks.js';
 import ProjectView, { projectSettings } from './board.js';
 import SettingsView from './settings.js';
@@ -22,18 +21,6 @@ if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWor
 
 // create an account with an invite (link or code) or the registration password
 // + : a task, a fixed appointment (an event in one of your calendars) or a flexible appointment (planned inside its window)
-async function newMenu(opts) {
-  const google = S.state.accounts.some(a => a.kind === 'google' && a.status === 'ok');
-  const v = await openModal(close => html`<div class="modal sm"><h3>New</h3><div class="menu">
-    <button onClick=${() => close('task')}>${I('list')}Task</button>
-    ${google && html`<button onClick=${() => close('event')}>${I('calendar')}Appointment</button>`}
-    <button onClick=${() => close('flex')}>${I('clock')}Flexible Appointment</button></div>
-    <div class="acts"><button onClick=${() => close(null)}>Cancel</button></div></div>`);
-  if (v === 'task') openTask('new', opts);
-  if (v === 'event') newEvent();
-  if (v === 'flex') newFlexible();
-}
-
 function Register({ back }) {
   const code0 = decodeURIComponent((location.hash.match(/^#\/join\/?([^?]*)/) || [])[1] || '');
   const [f, setF] = useState({ code: code0, name: '', username: '', password: '' }), [inv, setInv] = useState(null), [err, setErr] = useState(''), [busy, setBusy] = useState(false);

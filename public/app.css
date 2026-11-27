@@ -182,7 +182,7 @@ ul.ptk.sm li{font-size:14px;padding:2px 0}
 .timer .bar{flex:1;min-width:120px}.timer .bar>i{background:var(--now)}
 .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .btns button{font-size:15px;padding:8px 16px;border-radius:10px}
-.intr{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:18px}
+.intr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:18px}
 .intr button{flex-direction:column;gap:4px;font-size:12.5px;padding:10px 4px;border-radius:12px;background:var(--panel);color:var(--ink);font-weight:500}
 .intr button .ic{color:var(--acc)}
 .intr button:hover{background:var(--panel);box-shadow:0 0 0 1px var(--line) inset}
@@ -353,7 +353,7 @@ details.note{margin:12px 0 0 46px}
   .tabbar a.on{color:var(--acc)}
   .now,.ol{display:block}.now>section,.ol>section{padding:4px 16px}
   .ol>section:first-child{display:none}.chsel{display:block}.chap{padding:4px 16px 40px!important}.chap h3{font-size:22px}
-  .intr{grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}.intr button{font-size:11px;padding:8px 2px}
+  .intr{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.intr button{font-size:11px;padding:8px 2px}
   .trow{grid-template-columns:22px minmax(0,1fr)}.trow .meta{grid-column:2;flex-wrap:wrap}
   .trow .when{text-align:left;min-width:0}
   .list,.set{padding:4px 16px 40px}

@@ -6,10 +6,13 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-late-'));
 
 const { run, get } = await import('../server/db.js');
 const { createUser } = await import('../server/auth.js');
+const { settingsOf, saveSettings } = await import('../server/models.js');
 const { planUser, missedStart, openEnd } = await import('../server/planner.js');
 const A = await import('../server/actions.js');
 
 const u = createUser({ username: 'lea', name: 'Lea', password: 'long password 123' });
+const st = settingsOf(u), all24 = Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map(d => [d, ['00:00', '24:00']]));
+st.hours = { work: all24, personal: all24 }; st.fixed = []; saveSettings(u, st);   // independent of the time of day
 const now = Date.now();
 const pid = Number(run(`INSERT INTO projects(name, owner_id, created_at) VALUES ('Work', ?, ?)`, u, now).lastInsertRowid);
 run('INSERT INTO project_members(project_id, user_id) VALUES (?, ?)', pid, u);

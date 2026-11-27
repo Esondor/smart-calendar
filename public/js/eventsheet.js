@@ -178,10 +178,10 @@ export async function openEventSheet(ev) {
 
 // + → Flexible Appointment: e.g. "Dr. Miller, 30 min, Mon–Fri 08:00–11:00, in Family"; planned as soon as possible inside
 // the window (next to another appointment or about an hour before closing) and written to that calendar
-export async function newFlexible() {
+export async function newFlexible(at = null) {
   const cals = googleCals();
   const r = await openModal(close => { const B = () => {
-    const [f, setF] = useState({ title: '', minutes: 30, s: '08:00', e: '11:00', days: [1, 2, 3, 4, 5], cal: '', location: '', travel: 0, start: isoDate(Date.now()) });
+    const [f, setF] = useState({ title: '', minutes: 30, s: '08:00', e: '11:00', days: [1, 2, 3, 4, 5], cal: '', location: '', travel: 0, start: isoDate(at || Date.now()) });
     const set = x => setF({ ...f, ...x });
     return html`<div class="modal sm"><input type="text" class="ttl" placeholder="Title" value=${f.title} onInput=${e => set({ title: e.target.value })}/>
       <div class="box" style="margin-top:10px">

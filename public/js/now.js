@@ -143,19 +143,19 @@ async function askResearch(plan) {
   else await post('/api/timer/research', { task: u.taskId, period: u.period || 0, minutes: r.m, note: r.note });
   load(['plan']);
 }
-// Block Time, or a break at a time you choose (shown like Lunch; the plan works around it). From the calendar: at the time tapped.
-export async function blockTime(date, brk = false) {
+// Break / Block Time at a time you choose: shown like Lunch, the plan works around it; from the calendar at the time clicked
+export async function blockTime(date) {
   const t0 = date && date !== startOfDay(date) ? date : Math.ceil(Date.now() / 900000) * 900000;
   const r = await openModal(close => { const B = () => {
-    const [d, setD] = useState(isoDate(date || Date.now())), [s, setS] = useState(hm(t0)), [e, setE] = useState(hm(t0 + (brk ? 15 * 60000 : 3600e3))), [t, setT] = useState('');
-    return html`<div class="modal sm"><h3>${brk ? 'Break' : 'Block Time'}</h3>
+    const [d, setD] = useState(isoDate(date || Date.now())), [s, setS] = useState(hm(t0)), [e, setE] = useState(hm(t0 + 30 * 60000)), [t, setT] = useState('');
+    return html`<div class="modal sm"><h3>Break / Block Time</h3>
       <div class="row"><input type="date" value=${d} onInput=${x => setD(x.target.value)}/><input class="t24" value=${s} onChange=${x => setS(n24(x.target.value) || s)}/>–<input class="t24" value=${e} onChange=${x => setE(n24(x.target.value) || e)}/></div>
-      <input type="text" style="width:100%;margin-top:8px" placeholder="Title" value=${t} onInput=${x => setT(x.target.value)}/>
-      <div class="acts"><button onClick=${() => close(null)}>Cancel</button><button class="pri" onClick=${() => close({ d, s, e, t })}>${brk ? 'Add' : 'Block'}</button></div></div>`; }; return html`<${B}/>`; });
+      <input type="text" style="width:100%;margin-top:8px" placeholder="Break" value=${t} onInput=${x => setT(x.target.value)}/>
+      <div class="acts"><button onClick=${() => close(null)}>Cancel</button><button class="pri" onClick=${() => close({ d, s, e, t })}>Add</button></div></div>`; }; return html`<${B}/>`; });
   if (!r) return;
   const base = fromIso(r.d), toMs = x => base + (+x.slice(0, 2) * 60 + +x.slice(3)) * 60000;
   if (toMs(r.e) <= toMs(r.s)) return toast('End must be after start');
-  try { await post('/api/appts', { start: toMs(r.s), end: toMs(r.e), title: r.t || (brk ? 'Break' : 'Blocked'), kind: brk ? 'break' : 'appt' }); load(['plan']); } catch (e) { toast(e.message); }
+  try { await post('/api/appts', { start: toMs(r.s), end: toMs(r.e), title: r.t.trim() || 'Break', kind: 'break' }); load(['plan']); } catch (e) { toast(e.message); }
 }
 export function IntrBar({ plan, cols }) {
   const go = async (fn) => { try { await fn(); await load(['plan']); } catch (e) { toast(e.message); } };
@@ -163,7 +163,6 @@ export function IntrBar({ plan, cols }) {
     <button onClick=${async () => { const r = await askMinutes('Break', [10, 15, 20, 30, 60], 15); if (r?.m) go(() => post('/api/now/break', { minutes: r.m, title: 'Break' })); }}>${I('cup', 22)}Break</button>
     <button onClick=${() => go(() => post('/api/now/break', { minutes: 45, title: 'Lunch' }))}>${I('fork', 22)}Lunch</button>
     <button onClick=${async () => { const r = await askMinutes('Interruption', [5, 10, 15, 30, 60], 15, 'Reason (optional)'); if (r?.m) go(() => post('/api/now/interrupt', { minutes: r.m, title: r.t })); }}>${I('bolt', 22)}Interrupted</button>
-    <button onClick=${() => blockTime()}>${I('block', 22)}Block Time</button>
     <button onClick=${() => askResearch(plan)}>${I('book', 22)}Research</button>
   </div>`;
 }

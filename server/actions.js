@@ -154,6 +154,16 @@ export function addAppt(uid, start, end, title, kind = 'appt') {
   markDirty(uid);
   return id;
 }
+// a fixed break (Lunch, …) on one day only: moved there (it becomes a break of that day) or left out; the other days stay as set
+export function fixedOnDay(uid, fid, date, { start, end, title, remove = false } = {}) {
+  const f = (settingsOf(uid).fixed || []).find(x => String(x.id) === String(fid)); if (!f) return null;
+  const key = `${f.id}:${date}`;
+  if (!get(`SELECT 1 FROM appts WHERE user_id = ? AND kind = 'skipfixed' AND title = ?`, uid, key))
+    run(`INSERT INTO appts(user_id, start, end, title, kind) VALUES (?, ?, ?, ?, 'skipfixed')`, uid, dayStart(date), dayEnd(date), key);
+  const id = remove ? null : Number(run(`INSERT INTO appts(user_id, start, end, title, kind) VALUES (?, ?, ?, ?, 'break')`, uid, start, end, title || f.t).lastInsertRowid);
+  markDirty(uid);
+  return id;
+}
 export function breakNow(uid, minutes, title) {
   const now = Date.now(); stopTimer(uid);
   addAppt(uid, now, now + minutes * 60000, title, 'break');

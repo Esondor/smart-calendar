@@ -27,3 +27,19 @@ test('a scheduled break splits a long task around it', () => {
   assert.equal(mine.reduce((m, x) => m + (x.e - x.s), 0) / 60000, 180, 'all of it still planned');
   assert.equal(get('SELECT COUNT(*) n FROM outbox WHERE user_id = ?', u).n, 0, 'not written to the calendar');
 });
+
+test('a fixed break on one day: moved or left out there only; the plan uses it', () => {
+  const st = settingsOf(u); st.fixed = [{ id: 'l1', t: 'Lunch', s: '12:00', e: '12:45', days: [0, 1, 2, 3, 4, 5, 6], flex: false }]; saveSettings(u, st);
+  const isoDate = d => new Date(d).toLocaleDateString('sv'), dayStart = d => new Date(d + 'T00:00').getTime();
+  const d1 = isoDate(now + 864e5), d2 = isoDate(now + 2 * 864e5);
+  const lunch = d => planUser(u, now).busy.filter(b => b.t === 'Lunch' && isoDate(b.s) === d);
+  assert.equal(lunch(d1).length, 1);
+  const at = dayStart(d1) + 14 * 3600e3;
+  const id = A.fixedOnDay(u, 'l1', d1, { start: at, end: at + 30 * 60000 });
+  assert.deepEqual(lunch(d1).map(b => [b.kind, b.s]), [['break', at]], 'moved that day');
+  assert.equal(lunch(d2).length, 1, 'the next day as set');
+  A.fixedOnDay(u, 'l1', d2, { remove: true });
+  assert.equal(lunch(d2).length, 0, 'skipped that day');
+  assert.equal(planUser(u, now).busy.filter(b => b.t === 'Lunch' && isoDate(b.s) === isoDate(now + 3 * 864e5)).length, 1, 'other days unchanged');
+  assert.ok(id);
+});
