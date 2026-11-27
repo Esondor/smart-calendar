@@ -2,6 +2,7 @@ import { html, useState, useEffect, useLayoutEffect, useRef, S, api, post, patch
 import { openTask } from './taskedit.js';
 import { I } from './icons.js';
 import { blockTime } from './now.js';
+import { bookingSheet } from './bookings.js';
 import { openEventSheet, EventFields, googleCals, atTime, AlsoDots, newAppointment } from './eventsheet.js';
 
 const H0 = 0, H1 = 24;   // the whole day, 00:00 to 24:00
@@ -510,6 +511,7 @@ export default function CalendarView() {
       <button class="icon calnav" title="Previous" onClick=${() => step(-1)}>${I('left')}</button>
       <button onClick=${today}>Today</button>
       <button class="icon calnav" title="Next" onClick=${() => step(1)}>${I('right')}</button>
+      <button class="icon" title="Booking Links" aria-label="Booking links" onClick=${bookingSheet}>${I('share', 18)}</button>
       <button class=${'icon' + (collapse ? '' : ' on')} title=${collapse ? 'Show non-blocking events' : 'Minimise non-blocking events'} onClick=${toggleCollapse}>${I(collapse ? 'eyeoff' : 'eye', 18)}</button>
     </div>
     ${month ? html`

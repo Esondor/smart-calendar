@@ -7,6 +7,9 @@ const linkUrl = l => `${location.origin}/book/${l.token}`;
 const copy = async t => { try { await navigator.clipboard.writeText(t); toast('Link copied'); } catch { prompt('Link', t); } };
 const DURS = [15, 30, 45, 60, 90, 120];
 
+// the same list from the calendar's toolbar, so links can be copied or made without going to Settings
+export const bookingSheet = () => openModal(close => html`<div class="modal sm"><h3>Booking Links</h3><${BookingLinks}/>
+  <div class="acts"><button onClick=${() => close(null)}>Done</button></div></div>`);
 // Settings → Booking: a link per kind of meeting; whoever has it sees free times that fit your plan, never your entries
 export function BookingLinks() {
   const [L, setL] = useState(null);
@@ -17,7 +20,7 @@ export function BookingLinks() {
       <span class="hint">${l.minutes.map(m => dh(m)).join(', ')}</span></span>
       <span class="row" style="gap:4px;flex:none"><button class="icon" title="Copy link" onClick=${() => copy(linkUrl(l))}>${I('copy', 16)}</button>
         <button class="icon" title="Edit" onClick=${async () => { if (await editLink(l)) reload(); }}>${I('gear', 16)}</button></span></div>`)}
-    <button class="cell" style="color:var(--acc)" onClick=${async () => { const l = await editLink(null); if (l) { reload(); copy(linkUrl(l)); } }}><span class="row" style="gap:6px">${I('plus', 15)}New Booking Link</span></button>
+    <button class="cell addrow" onClick=${async () => { const l = await editLink(null); if (l) { reload(); copy(linkUrl(l)); } }}><span class="row" style="gap:6px">${I('plus', 15)}New Booking Link</span></button>
   </div>`;
 }
 async function editLink(l) {

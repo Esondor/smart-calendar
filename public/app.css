@@ -1197,3 +1197,4 @@ aside.files .box.clash{margin:0 0 8px}
 /* quick add on top of New: what it reads, as a button that opens the form */
 .modal input.quick{width:100%;box-sizing:border-box;margin:4px 0 8px;font-size:16px}
 .qprev{width:100%;justify-content:space-between;margin:0 0 10px;background:var(--acc-s);color:var(--acc);font-weight:500;text-align:left}
+.box>button.cell.addrow{width:100%;background:none;border-radius:0;color:var(--acc);justify-content:flex-start;padding-left:16px}
