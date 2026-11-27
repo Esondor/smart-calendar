@@ -222,7 +222,7 @@ export default function CalendarView() {
       const x = { kind: 'event', ev: e, s: Math.max(e.start - e.before * 60000, d0), e: Math.min(e.end + e.after * 60000, d1), s0: Math.max(e.start, d0), e0: Math.min(e.end, d1), t: e.title, cal: e.cal, free: !e.blocks, color: e.color };
       (collapse && (!e.blocks || e.hidden) ? mini : out).push(x);
     });
-    plan.busy.filter(b => b.e > d0 && b.s < d1).forEach(b => out.push({ kind: b.kind === 'fixed' ? 'fixed' : 'appt', s: Math.max(b.s, d0), e: Math.min(b.e, d1), t: b.t, id: b.id }));
+    plan.busy.filter(b => b.e > d0 && b.s < d1).forEach(b => out.push({ kind: b.kind === 'fixed' || b.kind === 'break' ? 'fixed' : 'appt', s: Math.max(b.s, d0), e: Math.min(b.e, d1), t: b.t, id: b.id }));   // breaks look like Lunch
     plan.blocks.map(b => { const p = pendFor(b); return p ? { ...b, s: p.s, e: p.e, srv: b.s, pinned: true } : b; })
       .filter(b => b.e > d0 && b.s < d1).forEach(b => { const u = plan.units[b.key]; if (u) out.push({ kind: 'block', s: b.s, e: b.e, b, u }); });
     // done and tracked: kept as it happened (timer sessions; a task ticked off without one, as the quarter hour before)
@@ -335,9 +335,9 @@ export default function CalendarView() {
     if (sel) return setSel(null);
     const y = e.clientY - e.currentTarget.getBoundingClientRect().top, ms = d0 + Math.floor((y / hh + H0) * 4) * 900000;
     const v = await openModal(close => html`<div class="modal sm"><h3>${DN[new Date(ms).getDay()]} ${SH(ms)}, ${hm(ms)}</h3>
-      <div class="menu"><button onClick=${() => close('task')}>${I('plus')}New Task</button>${googleCals().length > 0 && html`<button onClick=${() => close('event')}>${I('calendar')}New Event</button>`}<button onClick=${() => close('block')}>${I('block')}Block Time</button></div>
+      <div class="menu"><button onClick=${() => close('task')}>${I('plus')}New Task</button>${googleCals().length > 0 && html`<button onClick=${() => close('event')}>${I('calendar')}New Event</button>`}<button onClick=${() => close('block')}>${I('block')}Block Time</button><button onClick=${() => close('break')}>${I('cup')}Break</button></div>
       <div class="acts"><button onClick=${() => close(null)}>Cancel</button></div></div>`);
-    if (v === 'block') blockTime(ms);
+    if (v === 'block' || v === 'break') blockTime(ms, v === 'break');
     if (v === 'event') newEvent(ms);
     if (v === 'task') { const t = await openTask('new'); if (t?.id) { await post(`/api/tasks/${t.id}/pin`, { period: t.period || 0, s: ms, e: ms + (t.duration || 30) * 60000 }); load(['plan']); } }
   };
@@ -371,7 +371,7 @@ export default function CalendarView() {
                 <span class="et"><span class="kind">${I(ev.done ? 'check' : 'pin', 12)}</span>${x.t}<${AlsoDots} ev=${ev}/></span><span class="em">${hm(ev.start)}–${hm(ev.end)} · ${x.cal}</span>${ev.editable && html`<div class="rs rs-top"></div><div class="rs"></div>`}</div>`; })()}
             ${x.e > x.e0 && html`<div class="ev buf a" style=${{ ...part(x.e0, x.e), ...bc }} onClick=${open} title=${ev.travel?.home ? `Home: ${dh(ev.travel.min)} by ${ev.travel.mode}` : dh(ev.after) + ' after'}>${(x.e - x.e0) / 3600e3 * hh > 14 ? html`${ev.travel?.home ? html`<span class="way">${I(ev.travel.mode, 11)}</span>` : ''}${dh(ev.after)}` : ''}</div>`}`;
         }
-        return html`<div class=${'ev ' + x.kind} style=${style} title=${x.t}
+        return html`<div class=${'ev ' + x.kind + (x.id ? ' rm' : '')} style=${style} title=${x.t}
           onClick=${x.id ? async () => { if (await confirmDialog(`Remove “${x.t}”?`, 'Remove', true)) { await api('/api/appts/' + x.id, { method: 'DELETE', body: {} }); load(['plan']); } } : null}>
           <span class="et">${x.t}</span><span class="em">${hm(x.s)}–${hm(x.e)}</span></div>`;
       })}

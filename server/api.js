@@ -540,7 +540,8 @@ export default async function apiRoutes(app) {
   app.post('/api/appts', async req => {
     const b = req.body || {}, s = int(b.start), e = int(b.end);
     if (!(s && e > s)) throw httpErr(400, 'End must be after start');
-    return { id: A.addAppt(req.user.id, s, e, str(b.title || 'Blocked', 120), 'appt') };
+    const brk = b.kind === 'break';   // a break you schedule: shown like Lunch, not written to the calendar
+    return { id: A.addAppt(req.user.id, s, e, str(b.title || (brk ? 'Break' : 'Blocked'), 120), brk ? 'break' : 'appt') };
   });
   app.delete('/api/appts/:id', async req => { run('DELETE FROM appts WHERE id = ? AND user_id = ?', +req.params.id, req.user.id); markDirty(req.user.id); return { ok: true }; });
   // minutes today and this week: everything (timer sessions and the appointments you had, overlaps counted once)
