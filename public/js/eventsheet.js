@@ -200,12 +200,14 @@ export async function newAppointment(at = null) {
     // moving the start keeps the length; the end never before the start
     const setStart = x => { const n = { ...f, ...x }; if (!plan) { const len = atTime(f.ed, f.et || '00:00') - atTime(f.sd, f.st || '00:00'), e = atTime(n.sd, n.st || '00:00') + Math.max(len, 15 * 60000); n.ed = isoDate(e); n.et = hm(e); } setF(n); };
     const s = atTime(f.sd, f.st || '00:00'), e = plan ? (f.dd ? atTime(f.dd, f.dt || '23:59') : null) : f.all_day ? fromIso(f.ed) : atTime(f.ed, f.et || '00:00');
-    const ok = f.title.trim() && (plan ? f.minutes >= 5 && (!f.win || (f.days.length && f.we > f.ws)) && (!e || e > s) : (f.all_day ? f.ed >= f.sd : e > s));
+    // what is still missing: shown in red once you press Add
+    const miss = new Set([!f.title.trim() && 'title', plan && f.win && !f.days.length && 'days', plan && f.win && f.we <= f.ws && 'between', plan && e && e <= s && 'due',
+      !plan && (f.all_day ? f.ed < f.sd : !(e > s)) && 'end'].filter(Boolean)), ok = !miss.size, bad = k => f.tried && miss.has(k) ? ' bad' : '';
     const step = k => set({ minutes: Math.max(15, Math.min(12 * 60, f.minutes + k * 15)) });
-    return html`<div class="modal sm appt"><input type="text" class="ttl" placeholder="Title" value=${f.title} onInput=${x => set({ title: x.target.value })}/>
+    return html`<div class="modal sm appt"><input type="text" class=${'ttl' + bad('title')} placeholder="Title" value=${f.title} onInput=${x => set({ title: x.target.value })}/>
       ${cals.length > 0 && html`<div style="margin-top:12px"><${Switch2} a="Time" b="Planned" right=${plan} set=${v => set({ plan: v })}/></div>`}
       <div class="box" style="margin-top:12px">
-        <div class="cell two"><div><span class="lbl">Start</span><${DateTime} d=${f.sd} t=${f.st} empty=${!plan && f.all_day} setD=${v => setStart({ sd: v })} setT=${v => setStart({ st: v || f.st })}/></div>
+        <div class=${'cell two' + bad('due') + bad('end')}><div><span class="lbl">Start</span><${DateTime} d=${f.sd} t=${f.st} empty=${!plan && f.all_day} setD=${v => setStart({ sd: v })} setT=${v => setStart({ st: v || f.st })}/></div>
           <div><span class="lbl">${plan ? 'Due' : 'End'}</span>${plan
             ? html`<div class="dt">${f.dd ? html`<input type="date" value=${f.dd} min=${f.sd} onInput=${x => set({ dd: x.target.value })}/><div class="tm"><input class="t24" value=${f.dt} placeholder="--:--" onChange=${x => set({ dt: n24(x.target.value) || '' })}/><button type="button" class="icon" title="No due date" onClick=${() => set({ dd: '', dt: '' })}>${I('x', 14)}</button></div>`
               : html`<button type="button" class="none" onClick=${() => set({ dd: f.sd })}>None</button>`}</div>`
@@ -216,8 +218,8 @@ export async function newAppointment(at = null) {
         : html`
           <div class="cell"><span>Takes</span><span class="stepper"><button type="button" class="mn" title="Less" onClick=${() => step(-1)}></button><b>${dh(f.minutes)}</b><button type="button" class="pl" title="More" onClick=${() => step(1)}></button></span></div>
           <label class="cell"><span>Certain time window</span><input type="checkbox" checked=${f.win} onChange=${x => set({ win: x.target.checked })}/></label>
-          ${f.win ? html`<div class="cell"><span>Between</span><span class="row" style="gap:6px;flex:none"><input class="t24" value=${f.ws} onChange=${x => set({ ws: n24(x.target.value) || f.ws })}/>–<input class="t24" value=${f.we} onChange=${x => set({ we: n24(x.target.value) || f.we })}/></span></div>
-            <div class="cell"><div class="seg days">${WD.map(([d, l]) => html`<button type="button" class=${f.days.includes(d) ? 'on' : ''} onClick=${() => set({ days: f.days.includes(d) ? f.days.filter(x => x !== d) : [...f.days, d] })}>${l}</button>`)}</div></div>`
+          ${f.win ? html`<div class=${'cell' + bad('between')}><span>Between</span><span class="row" style="gap:6px;flex:none"><input class="t24" value=${f.ws} onChange=${x => set({ ws: n24(x.target.value) || f.ws })}/>–<input class="t24" value=${f.we} onChange=${x => set({ we: n24(x.target.value) || f.we })}/></span></div>
+            <div class=${'cell' + bad('days')}><div class="seg days">${WD.map(([d, l]) => html`<button type="button" class=${f.days.includes(d) ? 'on' : ''} onClick=${() => set({ days: f.days.includes(d) ? f.days.filter(x => x !== d) : [...f.days, d] })}>${l}</button>`)}</div></div>`
           : html`<div class="cell"><span>In</span><${SwitchN} opts=${hoursOpts()} value=${f.when} set=${v => set({ when: v })}/></div>`}
           <div class="cell ncell"><span>Priority</span><div class="seg ch pri">${PRIS.map(([i, l]) => html`<button type="button" class=${f.priority === i ? 'on' : ''} style=${f.priority === i ? { background: priColor(i), color: '#fff' } : null} onClick=${() => set({ priority: i })}>${l}</button>`)}</div></div>
           ${f.dd && f.priority > 0 && html`<div class="cell rise"><span></span><span class="row" style="gap:6px"><i style=${{ background: `linear-gradient(90deg,${priColor(f.priority)},${priColor(0)})` }}></i>ASAP by ${DN[new Date(fromIso(f.dd)).getDay()]} ${SH(fromIso(f.dd))}${f.dt ? ', ' + f.dt : ''}</span></div>`}`}
@@ -225,7 +227,7 @@ export async function newAppointment(at = null) {
         <div class="cell"><span>Place</span><${PlaceInput} value=${f.location} onChange=${v => set({ location: v })} onTravel=${plan ? m => set({ travel: m }) : null} travel=${f.travel}/></div>
         <div class="cell"><textarea rows="2" style="width:100%" placeholder="Notes" value=${f.notes} onInput=${x => set({ notes: x.target.value })}></textarea></div>
       </div>
-      <div class="acts"><button onClick=${() => close(null)}>Cancel</button><button class="pri" disabled=${!ok} onClick=${() => close({ ...f, s, e })}>Add</button></div></div>`; }; return html`<${B}/>`; });
+      <div class="acts"><button onClick=${() => close(null)}>Cancel</button><button class=${'pri' + (ok ? '' : ' off')} onClick=${() => ok ? close({ ...f, s, e }) : set({ tried: true })}>Add</button></div></div>`; }; return html`<${B}/>`; });
   if (!r) return;
   try {
     if (!r.plan) {

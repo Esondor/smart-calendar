@@ -1113,3 +1113,11 @@ aside.files .fhead b{white-space:nowrap}
 .appt .dt .tm:not(:has(button)){grid-template-columns:minmax(0,1fr)}
 .appt .dt .none{width:100%;justify-content:center;color:var(--muted);background:var(--fill)}
 .appt .dt input.t24,.appt .dt input[type=date]{width:100%!important;max-width:none}
+
+/* Add / Save with something missing: looks off, and pressing it marks what is missing in red */
+button.pri.off{opacity:.45}
+.ttl.bad{box-shadow:inset 0 -2px 0 var(--late)!important}
+.cell.bad{box-shadow:inset 0 0 0 2px var(--late);border-radius:10px}
+.cell.bad>span:first-child,.cell.bad .lbl{color:var(--late)}
+.bad{animation:shake .32s}
+@keyframes shake{20%,60%{transform:translateX(-4px)}40%,80%{transform:translateX(4px)}}

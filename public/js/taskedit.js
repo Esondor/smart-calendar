@@ -27,7 +27,7 @@ function Editor({ task, opts, close }) {
   const [f, setF] = useState(() => task ? { ...task, recur: task.recur || null, st: tOf(task.start_after, task.meta?.from), dt: tOf(task.deadline, task.meta?.due), win: !!task.meta?.win } : {
     title: opts.title || '', project_id: defProject, duration: st.settings?.dFree || 60, priority: 2, deadline: '', start_after: isoDate(now5), st: hm(now5), dt: '', assignee_id: st.me.id, win: false,
     auto: true, schedule: null, recur: null, points: [], notes: '', min_chunk: null, assign_mode: 'fixed', parent_id: opts.parent_id || null, col: opts.col || 0, location: '', meta: {} });
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false), [tried, setTried] = useState(false);
   const set = p => setF(x => ({ ...x, ...p }));
   const proj = projectById(+f.project_id), members = proj?.members || [];
   const sch = task?.sched, r = f.recur;
@@ -62,7 +62,7 @@ function Editor({ task, opts, close }) {
     : html`<div class="sched late">${I('warn', 15)}No free time available</div>`;
 
   return html`<div class="modal tedit" onKeyDown=${e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') save(); }}>
-    <input class="ttl" placeholder="Title" value=${f.title} onInput=${e => set({ title: e.target.value })} onKeyDown=${e => { if (e.key === 'Enter' && isNew) save(); }}/>
+    <input class=${'ttl' + (tried && !f.title.trim() ? ' bad' : '')} placeholder="Title" value=${f.title} onInput=${e => set({ title: e.target.value })} onKeyDown=${e => { if (e.key === 'Enter' && isNew) save(); }}/>
     ${status}
     <div class="box appt">
       <div class="cell"><span>Project</span><select value=${f.project_id} onChange=${e => set({ project_id: +e.target.value, parent_id: null })}>${st.projects.filter(p => !p.archived).map(p => html`<option value=${p.id}>${p.name}</option>`)}</select></div>
@@ -87,7 +87,7 @@ function Editor({ task, opts, close }) {
           <select value=${r.window || 'any'} onChange=${e => setR({ window: e.target.value })}><option value="any">Any time</option><option value="morning">Morning</option><option value="afternoon">Afternoon</option><option value="evening">Evening</option></select></div>`}
       ${members.length > 1 && html`<div class="cell"><span>Assignee</span><span class="row" style="gap:8px;flex:none"><select value=${f.assignee_id || ''} onChange=${e => set({ assignee_id: +e.target.value || null })} disabled=${r && f.assign_mode === 'rotate'}>${members.map(m => html`<option value=${m.id}>${m.name}</option>`)}</select>
           ${r && html`<label class="row" style="gap:6px"><input type="checkbox" class="sq" checked=${f.assign_mode === 'rotate'} onChange=${e => set({ assign_mode: e.target.checked ? 'rotate' : 'fixed' })}/>Take turns</label>`}</span></div>`}
-      <div class="cell"><span>Place</span>${proj?.places ? html`<div class="seg">${proj.places.map(pl => html`<button type="button" class=${(f.location || '').toLowerCase() === pl.toLowerCase() ? 'on' : ''} onClick=${() => set({ location: pl })}>${pl}</button>`)}</div>`
+      <div class=${'cell' + (tried && needPlace ? ' bad' : '')}><span>Place</span>${proj?.places ? html`<div class="seg">${proj.places.map(pl => html`<button type="button" class=${(f.location || '').toLowerCase() === pl.toLowerCase() ? 'on' : ''} onClick=${() => set({ location: pl })}>${pl}</button>`)}</div>`
         : S.state.maps ? html`<${PlaceInput} value=${f.location || ''} placeholder="None" onChange=${v => set({ location: v })}/>`
         : html`<span><input list="sc-locs" placeholder="None" value=${f.location || ''} onInput=${e => set({ location: e.target.value })} style="width:200px"/><datalist id="sc-locs">${(LOCS || []).map(l => html`<option value=${l}/>`)}</datalist></span>`}</div>
       ${googleCals().length > 0 && html`<div class="cell"><span>Calendar</span><select value=${f.meta?.calendarId || ''} onChange=${e => set({ meta: { ...(f.meta || {}), calendarId: +e.target.value || undefined } })}>
@@ -108,7 +108,7 @@ function Editor({ task, opts, close }) {
         <button onClick=${() => { close(null); moveDialog({ taskId: task.id, period, title: task.title, recur: !!task.recur }); }}>Postpone</button>
         <button onClick=${() => act(() => post(`/api/tasks/${task.id}/done`, { period, done: true }), 'Completed')}>${I('check', 15, { w: 2.2 })}Done</button>`}
       ${task && task.status === 'done' && html`<button onClick=${() => act(() => post(`/api/tasks/${task.id}/done`, { done: false }))}>Reopen</button>`}
-      <button class="pri" disabled=${busy || !f.title.trim() || needPlace} onClick=${save}>${isNew ? 'Add' : 'Save'}</button>
+      <button class=${'pri' + (!f.title.trim() || needPlace ? ' off' : '')} disabled=${busy} onClick=${() => !f.title.trim() || needPlace ? setTried(true) : save()}>${isNew ? 'Add' : 'Save'}</button>
     </div>
   </div>`;
 }
