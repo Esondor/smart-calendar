@@ -122,7 +122,7 @@ export async function openEventSheet(ev) {
           <label class="cell"><span>Certain time window</span><input type="checkbox" checked=${f.hours === '*'} onChange=${e => setF({ ...f, hours: e.target.checked ? '*' : '' })}/></label>
           ${f.hours === '*' ? html`<div class="cell"><span>Between</span><span class="row" style="gap:6px;flex:none"><input class="t24" value=${f.win.s} onChange=${e => setF({ ...f, win: { ...f.win, s: n24(e.target.value) || f.win.s } })}/>–<input class="t24" value=${f.win.e} onChange=${e => setF({ ...f, win: { ...f.win, e: n24(e.target.value) || f.win.e } })}/></span></div>
             <div class="cell"><div class="seg days">${WD.map(([d, l]) => html`<button type="button" class=${f.win.days.includes(d) ? 'on' : ''} onClick=${() => setF({ ...f, win: { ...f.win, days: f.win.days.includes(d) ? f.win.days.filter(x => x !== d) : [...f.win.days, d] } })}>${l}</button>`)}</div></div>`
-          : html`<div class="cell"><span>In</span><${SwitchN} opts=${[['', 'Any'], ...hoursOpts()]} value=${f.hours} set=${v => setF({ ...f, hours: v })}/></div>`}`}</div>
+          : html`<div class="cell"><span>In</span><${SwitchN} opts=${[['', 'Any'], ...hoursOpts(false)]} value=${f.hours === 'all' ? '' : f.hours} set=${v => setF({ ...f, hours: v })}/></div>`}`}</div>
       ${ev.editable && timed && rankOrder().order.length > 1 && html`<${EventRank} ev=${ev} value=${f.rank} set=${v => setF({ ...f, rank: v })}/>`}
       ${ev.editable && html`<${AlsoIn} ev=${ev}/>`}
       ${timed && ev.start <= Date.now() + 15 * 60000 && (ev.end > Date.now() || ev.track) && !ev.done && html`<div class="sect" style="margin:16px 4px 6px">Track</div><div class="menu">
@@ -212,7 +212,7 @@ export const lastUsed = (k, v) => { try { if (v === undefined) return localStora
 export const SwitchN = ({ opts, value, set }) => { const i = Math.max(0, opts.findIndex(([v]) => v === value));
   return html`<div class="swn" style=${{ '--n': opts.length, '--i': i }}>${opts.map(([v, l], k) => html`<button type="button" class=${k === i ? 'on' : ''} onClick=${() => set(v)}>${l}</button>`)}</div>`; };
 // your hours to plan in: each set of hours, or all of them together ("All day": never at night)
-export const hoursOpts = () => [...Object.keys(S.state.settings?.hours || { work: 1, personal: 1 }).map(n => [n, cap(n)]), ['all', 'All day']];
+export const hoursOpts = (all = true) => [...Object.keys(S.state.settings?.hours || { work: 1, personal: 1 }).map(n => [n, cap(n)]), ...(all ? [['all', 'All day']] : [])];
 export const Switch2 = ({ a, b, right, set }) => html`<button type="button" class=${'sw2' + (right ? ' r' : '')} onClick=${() => set(!right)}><span>${a}</span><span>${b}</span></button>`;
 export const DateTime = ({ d, t, setD, setT, empty }) => html`<div class="dt"><input type="date" value=${d} onInput=${e => setD(e.target.value)}/>${!empty && html`<div class="tm"><input class="t24" value=${t} placeholder="--:--" onChange=${e => setT(n24(e.target.value) || '')}/></div>`}</div>`;
 export async function newAppointment(at = null, end = null, pre = {}) {
