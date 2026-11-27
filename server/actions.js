@@ -19,6 +19,7 @@ export function setDone(uid, taskId, period, done, via = 'app') {
   const p = t.recur ? (period ?? 0) : 0;
   const act = get('SELECT * FROM active WHERE user_id = ?', uid);
   if (done && act && act.task_id === taskId && act.period === p) stopTimer(uid, { done: true });
+  if (done) { const ps = get('SELECT task_id, period FROM paused WHERE user_id = ?', uid); if (ps && ps.task_id === taskId && ps.period === p) settlePaused(uid, { gone: true }); }
   tx(() => {
     if (t.recur) {
       if (done) run(`INSERT INTO occurrences(task_id, period, status, at, by) VALUES (?, ?, 'done', ?, ?) ON CONFLICT(task_id, period) DO UPDATE SET status = 'done', at = excluded.at, by = excluded.by`, taskId, p, Date.now(), uid);
@@ -49,27 +50,76 @@ export function startTimer(uid, taskId, period = 0, mode = null, note = null, fr
   const a = get('SELECT * FROM active WHERE user_id = ?', uid);
   if (!from && a && a.task_id === taskId && a.period === period && (a.mode || null) === mode) return;
   stopTimer(uid); pauseEvent(uid);
+  if (!from && resumePaused(uid, taskId, period, mode)) return;
+  if (from) settlePaused(uid, { gone: true });
   run('INSERT INTO active(user_id, task_id, period, since, mode, note, until) VALUES (?, ?, ?, ?, ?, ?, ?)', uid, taskId, period, from ? from.since : Date.now(), mode, note, from ? from.until : null);
   const t = taskById(taskId);
   if (t && !t.recur && t.status === 'todo') { run(`UPDATE tasks SET status = 'doing', col = CASE WHEN col = 0 THEN 1 ELSE col END WHERE id = ?`, taskId); touchProject(t.project_id); }
   hooks.onStart.forEach(fn => { try { fn(t, uid); } catch (e) { console.error(e); } });
   markDirty(uid); notifyUsers([uid], 'timer');
 }
-export function stopTimer(uid, { done = false, end = Date.now() } = {}) {
+export function stopTimer(uid, { done = false, end = Date.now(), cal = true } = {}) {
   const a = get('SELECT * FROM active WHERE user_id = ?', uid); if (!a) return 0;
   run('DELETE FROM active WHERE user_id = ?', uid);
   const m = Math.max(0, (end - a.since) / 60000), t = taskById(a.task_id);
   if (m >= 1 && t) {
     run('INSERT INTO work_log(user_id, task_id, period, kind, start, end, note, done) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', uid, a.task_id, a.period, a.mode === 'r' ? 'research' : 'work', a.since, end, a.note, done ? 1 : 0);
     if (!t.recur) run('UPDATE tasks SET spent = spent + ? WHERE id = ?', m, a.task_id);
-    const r = a.mode === 'r';
-    // a block in the calendar that already shows this session (it is kept, cut to the real end): no second entry
-    const shown = !r && get('SELECT 1 FROM plan_events WHERE user_id = ? AND task_id = ? AND start <= ? AND end >= ?', uid, a.task_id, a.since + 60000, Math.min(end, Date.now()) - 60000);
-    if (!shown) logToCalendar(uid, (r ? 'Research' + (a.note ? ': ' + a.note : '') + ' · ' : done ? '✓ ' : '') + label(t), a.since, end, r ? 'research' : 'session');
+    if (cal) logSession(uid, a, t, end, done);
   }
   markDirty(uid); notifyUsers([uid], 'timer');
   return m;
 }
+function logSession(uid, a, t, end, done = false) {
+  const r = a.mode === 'r';
+  // a block in the calendar that already shows this session (it is kept, cut to the real end): no second entry
+  const shown = !r && get('SELECT 1 FROM plan_events WHERE user_id = ? AND task_id = ? AND start <= ? AND end >= ?', uid, a.task_id, a.since + 60000, Math.min(end, Date.now()) - 60000);
+  if (!shown) logToCalendar(uid, (r ? 'Research' + (a.note ? ': ' + a.note : '') + ' · ' : done ? '✓ ' : '') + label(t), a.since, end, r ? 'research' : 'session');
+}
+
+// ---------- pause ----------
+// Pause logs the session so far and keeps the task in Now. Resumed within 10 min, it goes on as one session (the
+// pause counts as part of it); after that the part before stays on its own and Resume starts a new session.
+export const RESUME_MS = 10 * 60000;
+export function pauseTimer(uid) {
+  const a = get('SELECT * FROM active WHERE user_id = ?', uid); if (!a) return 0;
+  if (a.mode === 'r') return stopTimer(uid);
+  const now = Date.now(), m = stopTimer(uid, { cal: false, end: now });
+  const log = get('SELECT id FROM work_log WHERE user_id = ? AND task_id = ? AND start = ? ORDER BY id DESC LIMIT 1', uid, a.task_id, a.since);
+  run('DELETE FROM paused WHERE user_id = ?', uid);
+  run('INSERT INTO paused(user_id, task_id, period, since, at, until, note, log_id, cal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', uid, a.task_id, a.period, a.since, now, a.until, a.note, log?.id ?? null, log ? 1 : 0);
+  notifyUsers([uid], 'timer');
+  return m;
+}
+// the paused session is split for good: its part goes into the log calendar; gone: no longer waits in Now
+export function settlePaused(uid, { gone = false, now = Date.now() } = {}) {
+  const p = get('SELECT * FROM paused WHERE user_id = ?', uid); if (!p) return;
+  if (p.cal && (gone || now - p.at >= RESUME_MS)) {
+    const t = taskById(p.task_id);
+    if (t) logSession(uid, { task_id: p.task_id, since: p.since, mode: null, note: p.note }, t, p.at);
+    run('UPDATE paused SET cal = 0 WHERE user_id = ?', uid);
+  }
+  if (gone) { run('DELETE FROM paused WHERE user_id = ?', uid); notifyUsers([uid], 'timer'); }
+}
+export function settleAllPaused(now = Date.now()) {
+  for (const p of all('SELECT user_id FROM paused WHERE cal = 1 AND at <= ?', now - RESUME_MS)) settlePaused(p.user_id, { now });
+}
+// Start on the paused task within 10 min: the logged part is taken back and the session goes on from its old start
+function resumePaused(uid, taskId, period, mode) {
+  const p = get('SELECT * FROM paused WHERE user_id = ?', uid); if (!p) return false;
+  const same = p.task_id === taskId && p.period === period && !mode;
+  const log = same && p.log_id && get('SELECT * FROM work_log WHERE id = ?', p.log_id);
+  if (!same || Date.now() - p.at >= RESUME_MS || (p.log_id && !log)) { settlePaused(uid, { gone: true }); return false; }
+  if (log) {
+    run('DELETE FROM work_log WHERE id = ?', log.id);
+    const t = taskById(taskId); if (t && !t.recur) run('UPDATE tasks SET spent = MAX(0, spent - ?) WHERE id = ?', (log.end - log.start) / 60000, taskId);
+  }
+  run('DELETE FROM paused WHERE user_id = ?', uid);
+  run('INSERT INTO active(user_id, task_id, period, since, mode, note, until) VALUES (?, ?, ?, ?, NULL, ?, ?)', uid, taskId, period, p.since, p.note, p.until);
+  markDirty(uid); notifyUsers([uid], 'timer');
+  return true;
+}
+
 // research already done: counts as work on the task (moves minutes out of a running writing session)
 export function logResearch(uid, taskId, period, minutes, note) {
   const now = Date.now(), a = get('SELECT * FROM active WHERE user_id = ?', uid);
@@ -164,11 +214,13 @@ export function pinBlock(uid, taskId, period, oldStart, s, e) {
   markDirty(uid);
 }
 export function postpone(uid, taskId, period, until) {
+  if (get('SELECT 1 FROM paused WHERE user_id = ? AND task_id = ?', uid, taskId)) settlePaused(uid, { gone: true });
   run(`DELETE FROM overrides WHERE user_id = ? AND task_id = ? AND period = ? AND kind = 'pin'`, uid, taskId, period);
   run(`INSERT INTO overrides(user_id, task_id, period, kind, start, end, created_at) VALUES (?, ?, ?, 'defer', ?, ?, ?)`, uid, taskId, period, Date.now(), until, Date.now());
   markDirty(uid);
 }
 export function skipOccurrence(uid, taskId, period) {
+  if (get('SELECT 1 FROM paused WHERE user_id = ? AND task_id = ?', uid, taskId)) settlePaused(uid, { gone: true });
   const t = taskById(taskId); if (!t || !t.recur) return;
   run(`INSERT INTO occurrences(task_id, period, status, at, by) VALUES (?, ?, 'skipped', ?, ?) ON CONFLICT(task_id, period) DO UPDATE SET status = 'skipped'`, taskId, period, Date.now(), uid);
   logActivity(t.project_id, uid, `Skipped ${label(t)}`);

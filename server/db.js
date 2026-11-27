@@ -380,6 +380,13 @@ const MIGRATIONS = [
   );
   `,
   `ALTER TABLE active ADD COLUMN until INTEGER;           -- started late from the planned time: the session runs to here, 30 min more each time it is reached, until Done`,
+  `CREATE TABLE paused (                                -- Pause: the session so far is logged; resumed within 10 min it goes on as one, else Resume starts a new one
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    period INTEGER NOT NULL DEFAULT 0,
+    since INTEGER NOT NULL, at INTEGER NOT NULL, until INTEGER, note TEXT,
+    log_id INTEGER, cal INTEGER NOT NULL DEFAULT 1   -- cal: the session still has to go into the log calendar (once it is split)
+  );`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

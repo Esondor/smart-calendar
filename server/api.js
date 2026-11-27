@@ -492,7 +492,8 @@ export default async function apiRoutes(app) {
     const end = Math.max(0, ...Object.values(p.info).map(i => i.end || 0));
     const projectEnds = {};
     for (const b of p.blocks) { const u = p.units[b.key]; if (u) projectEnds[u.t.project_id] = Math.max(projectEnds[u.t.project_id] || 0, b.e); }
-    return { now, user: uid, projectEnds, blocks, units, later, unplaced, busy: busy.filter(b => b.kind !== 'event' && b.kind !== 'buffer'), events: evs, moved, done: [...doneT, ...doneO], log, active: act ? { ...act, until: act.until ? openEnd(act.until, now) : null } : null, late: act ? null : missedStart(uid, now, { late: false }), nextKeys: order.slice(0, 8), nextUnits: Object.fromEntries(order.slice(0, 8).map(k => [k, unitOut(p.units[k], p.info[k])])), projectedEnd: end || null };
+    return { now, user: uid, projectEnds, blocks, units, later, unplaced, busy: busy.filter(b => b.kind !== 'event' && b.kind !== 'buffer'), events: evs, moved, done: [...doneT, ...doneO], log, active: act ? { ...act, until: act.until ? openEnd(act.until, now) : null } : null,
+      paused: act ? null : get('SELECT p.task_id, p.period, p.since, p.at, t.title FROM paused p JOIN tasks t ON t.id = p.task_id WHERE p.user_id = ?', uid) || null, late: act ? null : missedStart(uid, now, { late: false }), nextKeys: order.slice(0, 8), nextUnits: Object.fromEntries(order.slice(0, 8).map(k => [k, unitOut(p.units[k], p.info[k])])), projectedEnd: end || null };
   });
   // a shared project: when the other members are planned to work on its tasks (only those blocks, nothing else of their calendars)
   app.get('/api/projects/:id/team', async req => {
@@ -526,7 +527,8 @@ export default async function apiRoutes(app) {
       from = { since: m.s, until: Math.max(m.e, m.s + 15 * 60000) + 30 * 60000 };
     }
     A.startTimer(req.user.id, t.id, period, b.mode === 'r' ? 'r' : null, b.note ? str(b.note, 200) : null, from); return { ok: true }; });
-  app.post('/api/timer/stop', async req => ({ minutes: A.stopTimer(req.user.id) }));
+  app.post('/api/timer/stop', async req => ({ minutes: A.pauseTimer(req.user.id) }));
+  app.post('/api/timer/drop', async req => { A.settlePaused(req.user.id, { gone: true }); return { ok: true }; });   // a paused task no longer waits in Now
   app.post('/api/timer/research', async req => { const b = req.body || {}, t = needTask(req.user.id, b.task); A.logResearch(req.user.id, t.id, int(b.period, 0), Math.max(1, Math.min(600, int(b.minutes, 15))), b.note ? str(b.note, 200) : null); return { ok: true }; });
   app.post('/api/timer/more', async req => { const t = needTask(req.user.id, req.body?.task); A.addMinutes(req.user.id, t.id, Math.max(5, int(req.body?.minutes, 30))); return { ok: true }; });
   app.post('/api/now/break', async req => { A.breakNow(req.user.id, Math.max(1, Math.min(600, int(req.body?.minutes, 15))), str(req.body?.title || 'Break', 80)); return { ok: true }; });

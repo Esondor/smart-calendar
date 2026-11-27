@@ -174,7 +174,7 @@ export default async function extRoutes(app) {
     if (!(until > Date.now() && until < Date.now() + 366 * 864e5)) throw httpErr(400, 'Invalid time');
     A.postpone(u.id, ownTask(u, +req.params.id), per(req), until); return { ok: true }; });
   app.post('/api/ext/tasks/:id/skip', async req => { const { u } = tokenFrom(req, 'api'); A.skipOccurrence(u.id, ownTask(u, +req.params.id), per(req)); return { ok: true }; });
-  app.post('/api/ext/timer/stop', async req => { const { u } = tokenFrom(req, 'api'); A.stopTimer(u.id); return { ok: true }; });
+  app.post('/api/ext/timer/stop', async req => { const { u } = tokenFrom(req, 'api'); A.pauseTimer(u.id); return { ok: true }; });
   app.post('/api/ext/break', async req => { const { u } = tokenFrom(req, 'api'); A.breakNow(u.id, Math.max(5, Math.min(120, +req.body?.minutes || 15)), req.body?.title === 'Lunch' ? 'Lunch' : 'Break'); return { ok: true }; });
   // appointments: start, pause, done (eventdone.js: the real end, earlier or later than planned, and a new plan from there)
   app.post('/api/ext/events/:id/start', async req => { const { u } = tokenFrom(req, 'api'); return startEvent(u.id, ownEvent(u, +req.params.id)); });
@@ -262,7 +262,7 @@ export default async function extRoutes(app) {
     const { uid, task } = wallUser(req), tid = +req.body?.task; task(tid);
     A.startTimer(uid, tid, +(req.body?.period || 0)); return { ok: true };
   });
-  app.post('/api/wall/:uid/stop', async req => { const { uid } = wallUser(req); A.stopTimer(uid); return { ok: true }; });
+  app.post('/api/wall/:uid/stop', async req => { const { uid } = wallUser(req); A.pauseTimer(uid); return { ok: true }; });
   // add a chore from the display: into the household project (the one with places), for the chosen person
   app.post('/api/wall/:uid/tasks', async req => {
     const { uid, ids, pids } = wallUser(req), b = req.body || {};

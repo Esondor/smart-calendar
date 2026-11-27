@@ -12,8 +12,13 @@ export function currentUnit(plan) {
     if (k) return unitOf(plan, k);
     return { key: String(plan.active.task_id), taskId: plan.active.task_id, period: plan.active.period, title: plan.active.title, points: [], duration: 0, spent: 0 };
   }
+  if (plan.paused) {   // paused: stays here until it is resumed, done, postponed or stopped
+    const pa = plan.paused, k = Object.keys({ ...plan.nextUnits, ...plan.units }).find(k => { const p = keyParts(k); return p.task === pa.task_id && p.period === (pa.period || 0); });
+    if (k) return unitOf(plan, k);
+  }
   return plan.nextKeys?.length ? unitOf(plan, plan.nextKeys[0]) : null;
 }
+const pausedOn = (plan, u) => plan.paused && u && plan.paused.task_id === u.taskId && (plan.paused.period || 0) === (u.period || 0);
 const taskOf = id => S.state.tasks.find(t => t.id === id);
 const running = (plan, u) => plan.active && u && plan.active.task_id === u.taskId && (plan.active.period || 0) === (u.period || 0);
 const usedMin = (plan, u) => (u.spent || 0) + (running(plan, u) ? (Date.now() - plan.active.since) / 60000 : 0);
@@ -61,9 +66,10 @@ export function FocusCard({ plan, big = true }) {
   const u = u0;
   if (!u) return html`<div class="focus idle"><div class="ft">Nothing planned</div></div>`;
   const run = running(plan, u), rs = run && plan.active.mode === 'r', used = usedMin(plan, u), planned = Math.max(u.duration || 0, 1);
-  const startsLater = !run && u.first && u.first > Date.now() + 60000;
+  const pz = !run && pausedOn(plan, u);
+  const startsLater = !run && !pz && u.first && u.first > Date.now() + 60000;
   // forgot to start: from the planned time, 30 min more each time, until Done; shown a minute into the block, also if the plan was not reloaded
-  const due = !run && (plan.late?.key === u.key ? plan.late : (plan.blocks || []).find(b => b.key === u.key && b.s <= nowMs && b.e > nowMs));
+  const due = !run && !pz && (plan.late?.key === u.key ? plan.late : (plan.blocks || []).find(b => b.key === u.key && b.s <= nowMs && b.e > nowMs));
   const late = due && due.s < nowMs - 60000 ? due : null;
   const ctx = context(u);
   const act = async (fn, msg) => { try { await fn(); await load(['plan', 'tasks']); if (msg) toast(msg); } catch (e) { toast(e.message); } };
@@ -78,7 +84,7 @@ export function FocusCard({ plan, big = true }) {
       <div class="btns"><button onClick=${() => act(() => post('/api/timer/start', p))}>${I('play', 16, { w: 2 })}Start Now</button><button onClick=${() => moveDialog(u)}>Postpone</button></div>
     </div>`;
   return html`<div class="focus">
-    <div class=${'lab' + (run ? ' live' : '')}>${rs ? 'Research' + (plan.active.note ? ' · ' + plan.active.note : '') : run ? 'In progress' + (plan.active.until ? ' · until ' + hm(plan.active.until) : '') : startsLater ? 'Next · ' + when(u.first) : 'Up now'}</div>
+    <div class=${'lab' + (run ? ' live' : '')}>${rs ? 'Research' + (plan.active.note ? ' · ' + plan.active.note : '') : run ? 'In progress' + (plan.active.until ? ' · until ' + hm(plan.active.until) : '') : pz ? 'Paused · ' + hm(plan.paused.at) : startsLater ? 'Next · ' + when(u.first) : 'Up now'}</div>
     ${ctx.text && html`<div class="ctx">${ctx.text}</div>`}
     <div class="ft" onClick=${() => openTask(u.taskId)}>${ctx.num ? html`<span style="color:var(--muted)">${ctx.num} </span>` : ''}${u.title}</div>
     ${big ? html`<${PointList} u=${u} big/>` : (u.points?.length ? html`<div class="hint">${u.points.filter(x => x.done).length} of ${u.points.length}</div>` : '')}
@@ -87,7 +93,8 @@ export function FocusCard({ plan, big = true }) {
     ${u.late && html`<div class="w late">${I('warn', 15)}Misses its deadline</div>`}
     <div class="timer"><span class="clk">${clock(used)}</span><span class="of">of ${dh(planned)}</span><div class="bar"><i style=${{ width: Math.min(100, 100 * used / planned) + '%' }}></i></div></div>
     <div class="btns">
-      ${run && !rs ? html`<button onClick=${() => act(() => post('/api/timer/stop'))}>${I('pause', 16, { w: 2.4 })}Pause</button>` : html`<button class="go" onClick=${() => act(() => post('/api/timer/start', p))}>${I('play', 16, { w: 2 })}${rs ? 'Resume' : 'Start'}</button>`}
+      ${run && !rs ? html`<button onClick=${() => act(() => post('/api/timer/stop'))}>${I('pause', 16, { w: 2.4 })}Pause</button>` : html`<button class="go" onClick=${() => act(() => post('/api/timer/start', p))}>${I('play', 16, { w: 2 })}${rs || pz ? 'Resume' : 'Start'}</button>`}
+      ${pz && html`<button onClick=${() => act(() => post('/api/timer/drop'))}>Stop</button>`}
       ${!run && late && html`<button onClick=${() => act(() => post('/api/timer/start', { ...p, planned: true }))}>${I('play', 16, { w: 2 })}Start from ${hm(late.s)}</button>`}
       ${rs && html`<button onClick=${() => act(() => post('/api/timer/stop'))}>${I('pause', 16, { w: 2.4 })}Stop</button>`}
       <button class="ok" onClick=${() => act(() => post(`/api/tasks/${u.taskId}/done`, { period: u.period || 0 }), 'Completed')}>${I('check', 16, { w: 2.4 })}Done</button>

@@ -265,6 +265,7 @@ By default the bar shows what Now shows: appointments that block time, without h
 
 The quick menu has these buttons:
 - **Tasks:** Start, Pause, Done, 30 More Minutes, Postpone, Skip.
+- **Pause:** what you did so far is logged right away and the task stays in Now as *Paused*. Resume within 10 minutes and it carries on as one session; after that, the part before stays as its own entry and Resume starts a new one. *Stop* lets the paused task go.
 - **Start from the planned time:** forgot to press Start? *Start from 14:00* counts from when the block was planned. The block runs to its planned end plus 30 minutes and gets 30 more each time that's reached, until you press Done.
 - **Free time:** Break, Lunch.
 - **Appointments:** Join, Start, Pause and Done.
