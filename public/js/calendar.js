@@ -36,6 +36,16 @@ export async function newMenu({ at = null, project_id } = {}) {
 const store = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const stored = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 
+// what the colors mean: priority (tasks, the edge of an appointment) and the calendars that are in view
+function Legend({ plan }) {
+  if (!plan) return null;
+  const cals = new Map();
+  for (const e of plan.events || []) if (e.color && !cals.has(e.cal)) cals.set(e.cal, e.color);
+  const byId = new Map((S.state.accounts || []).flatMap(a => a.calendars || []).map(c => [+c.id, c]));
+  for (const u of Object.values(plan.units || {})) { const c = byId.get(+u.meta?.calendarId); if (c?.color && !cals.has(c.name)) cals.set(c.name, c.color); }
+  return html`<div class="legend"><span class="lg"><span>Low</span><i class="pgrad"></i><span>ASAP</span></span>
+    ${[...cals].sort((a, b) => a[0].localeCompare(b[0])).map(([n, c]) => html`<span class="lg" key=${n}><i style=${{ background: c }}></i>${n}</span>`)}</div>`;
+}
 export default function CalendarView() {
   const st = S.state;
   const mobile = matchMedia('(max-width:860px)').matches, GUT = mobile ? 44 : 52;
@@ -430,6 +440,7 @@ export default function CalendarView() {
           </div>
         </div>`}
       </div>`}
+    <${Legend} plan=${plan}/>
   </div>`;
 }
 
