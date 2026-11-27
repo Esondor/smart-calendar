@@ -7,6 +7,17 @@ import { notifyUsers } from './bus.js';
 import { travelMode, physical, placeOf, placeKey, ruleOf, pinUrl } from './travel.js';
 import { orderRanks } from './order.js';
 
+const MISSED = new Map();         // uid -> { key, s, e }: the block that should be running now, as first planned (it slides with the clock while nobody starts it)
+const STEP = 30 * 60000;
+// a session started from the planned time runs to `until`, then 30 min more each time that is reached
+export const openEnd = (until, now = Date.now()) => until > now ? until : until + Math.ceil((now - until + 1) / STEP) * STEP;
+// the planned start of the block you missed: not before today, not before your last tracked session
+export function missedStart(uid, now = Date.now()) {
+  const m = MISSED.get(uid); if (!m || m.s > now - 60000) return null;
+  const last = get('SELECT MAX(end) e FROM work_log WHERE user_id = ? AND end <= ?', uid, now)?.e || 0;
+  const s = Math.max(m.s, last, dayStart(isoDate(now)));
+  return s < now - 60000 ? { key: m.key, s, e: m.e } : null;
+}
 const PLANS = new Map();          // uid -> { at, next, sig, blocks, info, items }
 const dirty = new Set(), byClock = new Set();   // byClock: re-planned only because time passed
 let timer = null;
@@ -299,7 +310,11 @@ export function planUser(uid, now = Date.now()) {
       // running without a plan: the session is a block from its start to a little ahead (in the calendar while you work,
       // cut to the real end when you pause or finish); a later start adds the next one
       if (act && act.task_id === u.t.id && (act.period || 0) === (u.period || 0))
-        items.push({ key: u.key, remaining: 0, schedule: u.t.schedule || u.t.p_schedule || 'work', pins: [{ s: act.since, e: Math.ceil((now + 60000) / 300000) * 300000 }], live: true });
+        items.push({ key: u.key, remaining: 0, schedule: u.t.schedule || u.t.p_schedule || 'work', pins: [{ s: act.since, e: act.until ? openEnd(act.until, now) : Math.ceil((now + 60000) / 300000) * 300000 }], live: true });
+      continue;
+    }
+    if (act?.until && act.task_id === u.t.id && (act.period || 0) === (u.period || 0)) {
+      items.push({ key: u.key, remaining: 0, schedule: u.t.schedule || u.t.p_schedule || 'work', pins: [{ s: act.since, e: openEnd(act.until, now) }], live: true });
       continue;
     }
     const running = act && act.task_id === u.t.id && (act.period || 0) === (u.period || 0) ? (now - act.since) / 60000 : 0;
@@ -337,6 +352,12 @@ export function planUser(uid, now = Date.now()) {
   for (const o of ov) { edge(o.start); edge(o.end); }
   for (const u of units) edge(u.earliest || 0);
   for (const r of all(`SELECT t.wait_until FROM tasks t JOIN project_members m ON m.project_id = t.project_id AND m.user_id = ? WHERE t.status != 'done' AND t.wait_until > ?`, uid, now)) edge(r.wait_until);
+  // remember the block that is due now as first planned: when it is started late, it can start from there
+  const mark = Math.ceil(now / 300000) * 300000;
+  const cur = act ? null : res.blocks.filter(b => b.s <= mark && b.e > now).sort((a, b) => a.s - b.s)[0];
+  const was = MISSED.get(uid);
+  if (!cur) MISSED.delete(uid);
+  else if (!was || was.key !== cur.key) MISSED.set(uid, { key: cur.key, s: cur.s, e: cur.e });
   const sig = JSON.stringify([res.blocks.map(b => [b.key, b.s, b.e]), shown.map(b => [b.s, b.e, b.t]), res.info]);
   const plan = { at: Date.now(), now, next, sig, blocks: res.blocks, info: res.info, units: byKey, busy: shown, range: [now - 864e5, end] };
   PLANS.set(uid, plan);

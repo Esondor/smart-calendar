@@ -379,6 +379,7 @@ const MIGRATIONS = [
     UNIQUE(project_id, to_id)
   );
   `,
+  `ALTER TABLE active ADD COLUMN until INTEGER;           -- started late from the planned time: the session runs to here, 30 min more each time it is reached, until Done`,
 ];
 
 const ver = db.prepare('PRAGMA user_version').get().user_version;

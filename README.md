@@ -264,6 +264,7 @@ By default the bar shows what Now shows: appointments that block time, without h
 
 The quick menu has these buttons:
 - **Tasks:** Start, Pause, Done, 30 More Minutes, Postpone, Skip.
+- **Start from the planned time:** forgot to press Start? *Start from 14:00* counts from when the block was planned. The block runs to its planned end plus 30 minutes and gets 30 more each time that's reached, until you press Done.
 - **Free time:** Break, Lunch.
 - **Appointments:** Join, Start, Pause and Done.
   - Start (from an hour before) gives it its real start: it moves to now in Google with the same length (the buffer takes up the rest), and what is flexible around it is planned again. Resuming after a pause changes nothing. A read-only calendar keeps its time; Smart Calendar plans with the real start.

@@ -44,11 +44,12 @@ export function setDone(uid, taskId, period, done, via = 'app') {
 }
 
 // ---------- timer ----------
-export function startTimer(uid, taskId, period = 0, mode = null, note = null) {
+// from: started late, from the planned time (since) and running to until, 30 min more each time, until Done
+export function startTimer(uid, taskId, period = 0, mode = null, note = null, from = null) {
   const a = get('SELECT * FROM active WHERE user_id = ?', uid);
-  if (a && a.task_id === taskId && a.period === period && (a.mode || null) === mode) return;
+  if (!from && a && a.task_id === taskId && a.period === period && (a.mode || null) === mode) return;
   stopTimer(uid); pauseEvent(uid);
-  run('INSERT INTO active(user_id, task_id, period, since, mode, note) VALUES (?, ?, ?, ?, ?, ?)', uid, taskId, period, Date.now(), mode, note);
+  run('INSERT INTO active(user_id, task_id, period, since, mode, note, until) VALUES (?, ?, ?, ?, ?, ?, ?)', uid, taskId, period, from ? from.since : Date.now(), mode, note, from ? from.until : null);
   const t = taskById(taskId);
   if (t && !t.recur && t.status === 'todo') { run(`UPDATE tasks SET status = 'doing', col = CASE WHEN col = 0 THEN 1 ELSE col END WHERE id = ?`, taskId); touchProject(t.project_id); }
   hooks.onStart.forEach(fn => { try { fn(t, uid); } catch (e) { console.error(e); } });

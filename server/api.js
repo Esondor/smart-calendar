@@ -5,7 +5,7 @@ import { all, get, run, tx, J } from './db.js';
 import { encrypt } from './crypto.js';
 import { httpErr } from './auth.js';
 import { settingsOf, saveSettings, publicUser, allUsers, contactsOf, projectIdsFor, isMember, membersOf, projectRow, taskRow, taskById, canEditTask, logActivity } from './models.js';
-import { getPlan, markDirty, usersOfProject, parseKey, keyOf, assigneeOf, busyOf, shownBusy, calendarEvents, joinLink, eventRanker, winOf } from './planner.js';
+import { getPlan, markDirty, usersOfProject, parseKey, keyOf, assigneeOf, busyOf, shownBusy, calendarEvents, joinLink, eventRanker, winOf, missedStart, openEnd } from './planner.js';
 import * as A from './actions.js';
 import { bus, notifyUsers } from './bus.js';
 import * as google from './sync/google.js';
@@ -492,7 +492,7 @@ export default async function apiRoutes(app) {
     const end = Math.max(0, ...Object.values(p.info).map(i => i.end || 0));
     const projectEnds = {};
     for (const b of p.blocks) { const u = p.units[b.key]; if (u) projectEnds[u.t.project_id] = Math.max(projectEnds[u.t.project_id] || 0, b.e); }
-    return { now, user: uid, projectEnds, blocks, units, later, unplaced, busy: busy.filter(b => b.kind !== 'event' && b.kind !== 'buffer'), events: evs, moved, done: [...doneT, ...doneO], log, active: act || null, nextKeys: order.slice(0, 8), nextUnits: Object.fromEntries(order.slice(0, 8).map(k => [k, unitOut(p.units[k], p.info[k])])), projectedEnd: end || null };
+    return { now, user: uid, projectEnds, blocks, units, later, unplaced, busy: busy.filter(b => b.kind !== 'event' && b.kind !== 'buffer'), events: evs, moved, done: [...doneT, ...doneO], log, active: act ? { ...act, until: act.until ? openEnd(act.until, now) : null } : null, late: act ? null : missedStart(uid, now), nextKeys: order.slice(0, 8), nextUnits: Object.fromEntries(order.slice(0, 8).map(k => [k, unitOut(p.units[k], p.info[k])])), projectedEnd: end || null };
   });
   // a shared project: when the other members are planned to work on its tasks (only those blocks, nothing else of their calendars)
   app.get('/api/projects/:id/team', async req => {
@@ -517,7 +517,15 @@ export default async function apiRoutes(app) {
   }
 
   // ---------- timer + "Now" buttons ----------
-  app.post('/api/timer/start', async req => { const b = req.body || {}, t = needTask(req.user.id, b.task); A.startTimer(req.user.id, t.id, int(b.period, 0), b.mode === 'r' ? 'r' : null, b.note ? str(b.note, 200) : null); return { ok: true }; });
+  app.post('/api/timer/start', async req => { const b = req.body || {}, t = needTask(req.user.id, b.task), period = int(b.period, 0);
+    // planned: forgot to start: from the planned start, to the planned end + 30 min, then 30 min more each time, until Done
+    let from = null;
+    if (b.planned) {
+      const m = missedStart(req.user.id), k = m && parseKey(m.key);
+      if (!k || k.taskId !== t.id || k.period !== period) throw httpErr(409, 'No planned start');
+      from = { since: m.s, until: Math.max(m.e, m.s + 15 * 60000) + 30 * 60000 };
+    }
+    A.startTimer(req.user.id, t.id, period, b.mode === 'r' ? 'r' : null, b.note ? str(b.note, 200) : null, from); return { ok: true }; });
   app.post('/api/timer/stop', async req => ({ minutes: A.stopTimer(req.user.id) }));
   app.post('/api/timer/research', async req => { const b = req.body || {}, t = needTask(req.user.id, b.task); A.logResearch(req.user.id, t.id, int(b.period, 0), Math.max(1, Math.min(600, int(b.minutes, 15))), b.note ? str(b.note, 200) : null); return { ok: true }; });
   app.post('/api/timer/more', async req => { const t = needTask(req.user.id, req.body?.task); A.addMinutes(req.user.id, t.id, Math.max(5, int(req.body?.minutes, 30))); return { ok: true }; });
