@@ -330,10 +330,14 @@ export default async function apiRoutes(app) {
   });
   app.delete('/api/tasks/:id', async req => {
     const t = needTask(req.user.id, req.params.id);
-    run('DELETE FROM tasks WHERE id = ?', t.id); logActivity(t.project_id, req.user.id, `Deleted ${t.title}`); A.touchProject(t.project_id);
-    return { ok: true };
+    const undo = A.deleteTask(req.user.id, t.id); logActivity(t.project_id, req.user.id, `Deleted ${t.title}`); A.touchProject(t.project_id);
+    return { ok: true, undo };
   });
   app.post('/api/tasks/:id/done', async req => { const t = needTask(req.user.id, req.params.id); return taskOut(A.setDone(req.user.id, t.id, int(req.body?.period, 0), req.body?.done !== false), new Map()); });
+  app.post('/api/tasks/restore', async req => {   // undo a delete, within an hour
+    const id = A.restoreTask(req.user.id, String(req.body?.token || '')); if (!id) throw httpErr(404, 'Can no longer be undone'); return { ok: true, id };
+  });
+  app.post('/api/tasks/:id/unskip', async req => { const t = needTask(req.user.id, req.params.id); A.unskipOccurrence(req.user.id, t.id, int(req.body?.period, 0)); return { ok: true }; });
   app.post('/api/tasks/:id/skip', async req => { const t = needTask(req.user.id, req.params.id); A.skipOccurrence(req.user.id, t.id, int(req.body?.period, 0)); return { ok: true }; });
   app.post('/api/tasks/:id/next', async req => {
     const t = needTask(req.user.id, req.params.id);
@@ -543,6 +547,12 @@ export default async function apiRoutes(app) {
     const brk = b.kind === 'break';   // a break you schedule: shown like Lunch, not written to the calendar
     return { id: A.addAppt(req.user.id, s, e, str(b.title || (brk ? 'Break' : 'Blocked'), 120), brk ? 'break' : 'appt') };
   });
+  app.delete('/api/worklog/:id', async req => { const w = A.removeSession(req.user.id, +req.params.id); if (!w) throw httpErr(404, 'Not found'); return { ok: true, session: w }; });
+  app.post('/api/worklog', async req => {   // undo of a removed session
+    const b = req.body || {}, s = int(b.start), e = int(b.end), t = needTask(req.user.id, b.task_id);
+    if (!(s && e > s && e <= Date.now() + 60000)) throw httpErr(400, 'Invalid time');
+    return { id: A.addSession(req.user.id, { task_id: t.id, period: int(b.period, 0), kind: b.kind, start: s, end: e, note: b.note ? str(b.note, 200) : null, done: !!b.done }) };
+  });
   app.patch('/api/worklog/:id', async req => {
     const b = req.body || {}, s = int(b.start), e = int(b.end);
     if (!(s && e > s && e <= Date.now() + 60000)) throw httpErr(400, 'Invalid time');
@@ -554,6 +564,10 @@ export default async function apiRoutes(app) {
     const s = b.start != null ? int(b.start) : a.start, e = b.end != null ? int(b.end) : a.end;
     if (!(s && e > s)) throw httpErr(400, 'End must be after start');
     run('UPDATE appts SET start = ?, end = ?, title = ? WHERE id = ?', s, e, b.title ? str(b.title, 120) : a.title, a.id); markDirty(req.user.id); return { ok: true };
+  });
+  app.delete('/api/fixed/:id/day', async req => {   // undo: that day as set again
+    const date = String(req.query.date || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw httpErr(400, 'Invalid date');
+    A.fixedDayReset(req.user.id, req.params.id, date, int(req.query.break, 0) || null); return { ok: true };
   });
   app.post('/api/fixed/:id/day', async req => {
     const b = req.body || {}, date = String(b.date || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw httpErr(400, 'Invalid date');

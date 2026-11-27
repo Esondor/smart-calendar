@@ -174,6 +174,29 @@ export function moveSession(uid, id, start, end) {
   markDirty(uid); notifyUsers([uid], 'timer');
   return true;
 }
+// a fixed break on one day as set again: the day's skip goes, and the break it was moved to (if given)
+export function fixedDayReset(uid, fid, date, breakId = null) {
+  run(`DELETE FROM appts WHERE user_id = ? AND kind = 'skipfixed' AND title = ?`, uid, `${fid}:${date}`);
+  if (breakId) run(`DELETE FROM appts WHERE id = ? AND user_id = ? AND kind = 'break'`, breakId, uid);
+  markDirty(uid);
+}
+// a logged session removed in the calendar, or put back (undo): its minutes and its entry in Google follow
+export function removeSession(uid, id) {
+  const w = get('SELECT * FROM work_log WHERE id = ? AND user_id = ?', id, uid); if (!w) return null;
+  run('DELETE FROM work_log WHERE id = ?', id);
+  const t = taskById(w.task_id);
+  if (t && !t.recur) run('UPDATE tasks SET spent = MAX(0, spent - ?) WHERE id = ?', (w.end - w.start) / 60000, w.task_id);
+  run('UPDATE plan_events SET kept = 0 WHERE user_id = ? AND task_id = ? AND kept = 1 AND start < ? AND end > ?', uid, w.task_id, w.end, w.start);
+  markDirty(uid); notifyUsers([uid], 'timer');
+  return w;
+}
+export function addSession(uid, w) {
+  const t = taskById(w.task_id); if (!t) return null;
+  const id = Number(run('INSERT INTO work_log(user_id, task_id, period, kind, start, end, note, done) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', uid, w.task_id, w.period || 0, w.kind === 'research' ? 'research' : 'work', w.start, w.end, w.note || null, w.done ? 1 : 0).lastInsertRowid);
+  if (!t.recur) run('UPDATE tasks SET spent = spent + ? WHERE id = ?', (w.end - w.start) / 60000, w.task_id);
+  markDirty(uid); notifyUsers([uid], 'timer');
+  return id;
+}
 export function breakNow(uid, minutes, title) {
   const now = Date.now(); stopTimer(uid);
   addAppt(uid, now, now + minutes * 60000, title, 'break');
@@ -244,6 +267,39 @@ export function skipOccurrence(uid, taskId, period) {
   run(`INSERT INTO occurrences(task_id, period, status, at, by) VALUES (?, ?, 'skipped', ?, ?) ON CONFLICT(task_id, period) DO UPDATE SET status = 'skipped'`, taskId, period, Date.now(), uid);
   logActivity(t.project_id, uid, `Skipped ${label(t)}`);
   touchProject(t.project_id);
+}
+// undo a skip: the round is planned again (only a skip is taken back, never a done)
+export function unskipOccurrence(uid, taskId, period) {
+  const t = taskById(taskId); if (!t) return;
+  run(`DELETE FROM occurrences WHERE task_id = ? AND period = ? AND status = 'skipped'`, taskId, period);
+  touchProject(t.project_id);
+}
+// a deleted task can come back (⌘Z in the calendar): before it goes, everything that goes with it (its sub-tasks and every
+// row that points at them: sessions, rounds, pins, calendar entries …) is kept for an hour, then put back as it was
+const DELETED = new Map();
+const refsToTasks = () => all(`SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'tasks'`).flatMap(t =>
+  all(`SELECT "from" AS col FROM pragma_foreign_key_list(?) WHERE "table" = 'tasks'`, t.name).map(r => ({ table: t.name, col: r.col })));
+export function deleteTask(uid, id) {
+  const ids = [id];
+  for (let i = 0; i < ids.length; i++) all('SELECT id FROM tasks WHERE parent_id = ?', ids[i]).forEach(r => ids.push(r.id));
+  const q = ids.map(() => '?').join(',');
+  const snap = { tasks: ids.map(x => get('SELECT * FROM tasks WHERE id = ?', x)).filter(Boolean),
+    rows: refsToTasks().map(({ table, col }) => ({ table, rows: all(`SELECT * FROM "${table}" WHERE "${col}" IN (${q})`, ...ids) })).filter(x => x.rows.length) };
+  run('DELETE FROM tasks WHERE id = ?', id);
+  const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  DELETED.set(token, { uid, at: Date.now(), snap });
+  for (const [k, v] of DELETED) if (Date.now() - v.at > 3600e3) DELETED.delete(k);
+  return token;
+}
+export function restoreTask(uid, token) {
+  const d = DELETED.get(token); if (!d || d.uid !== uid) return null;
+  // the task first (it must come back); then each row on its own, so one that no longer fits does not stop the rest
+  const ins = (table, r) => { const ks = Object.keys(r); run(`INSERT OR IGNORE INTO "${table}"(${ks.map(k => `"${k}"`).join(',')}) VALUES (${ks.map(() => '?').join(',')})`, ...ks.map(k => r[k])); };
+  tx(() => d.snap.tasks.forEach(r => ins('tasks', r)));
+  for (const { table, rows } of d.snap.rows) for (const r of rows) { try { ins(table, r); } catch (e) { console.warn('restore', table, e.message); } }
+  DELETED.delete(token);
+  const t = d.snap.tasks[0]; if (t) touchProject(t.project_id);
+  return t?.id ?? null;
 }
 export { touchProject };
 

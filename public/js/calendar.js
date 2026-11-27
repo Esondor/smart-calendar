@@ -250,6 +250,12 @@ export default function CalendarView() {
   // last drop (several drags in a row are one change), then the plan around it follows.
   const drag = useRef(null), [sel, setSel] = useState(null), [, redraw] = useState(0);
   const pend = useRef(new Set());   // { key, starts: server starts it had, srv: its start on the server, s, e, ver, t, busy }
+  // what is on screen by its key (filled while drawing), so the selected item can be removed with ⌫ / Delete;
+  // every change made here can be taken back with ⌘Z / Ctrl+Z, the last one first
+  const onScreen = useRef(new Map()); onScreen.current = new Map();
+  const reg = it => { onScreen.current.set(selKey(it), it); return selKey(it); };
+  const undos = useRef([]);
+  const remember = fn => { undos.current.push(fn); if (undos.current.length > 40) undos.current.shift(); };
   const pendFor = b => { for (const p of pend.current) if (p.key === b.key && p.starts.has(b.s)) return p; return null; };
   const selKey = it => it.b.key + ':' + it.b.s;
   // drawn with CSS variables and a data attribute only: what the page renders (top, height, text) is never touched, so
@@ -310,6 +316,8 @@ export default function CalendarView() {
   };
   const place = (it, s, e) => {
     const srv = it.b.srv ?? it.b.s;
+    { const s0 = it.b.s, e0 = it.b.e, task = it.u.taskId, period = it.u.period || 0, was = !!it.b.pinned;   // undo: back where it was
+      remember(async () => { await post(`/api/tasks/${task}/pin`, { period, oldStart: s, s: s0, e: e0 }); if (!was) await post(`/api/tasks/${task}/auto`, { period }); }); }
     let p = pendFor({ key: it.b.key, s: srv });
     if (!p) pend.current.add(p = { key: it.b.key, task: it.u.taskId, period: it.u.period || 0, starts: new Set([srv]), srv, ver: 0 });
     p.s = s; p.e = e; p.ver++;
@@ -331,21 +339,57 @@ export default function CalendarView() {
       const ev = g.it.ev;
       if (ev.recurring && !(await confirmDialog(`Move only this “${ev.title}”?`, 'This Event'))) return unpaint(el);
       setSel(null);
-      try { await patch('/api/events/' + ev.id, { start: s, end: e }); await load(['plan']); } catch (err) { toast(err.message); }
+      try { await patch('/api/events/' + ev.id, { start: s, end: e }); remember(() => patch('/api/events/' + ev.id, { start: ev.start, end: ev.end })); await load(['plan']); } catch (err) { toast(err.message); }
       return unpaint(elOf(g));
     }
     if (isBusy) { setSel(null); await saveBusy(g.it.bu, { s, e }); return unpaint(elOf(g)); }
-    if (isLog) { setSel(null); try { await patch('/api/worklog/' + g.it.id, { start: s, end: e }); await load(['plan', 'tasks']); } catch (err) { toast(err.message); } return unpaint(elOf(g)); }
+    if (isLog) { setSel(null); try { const { id, s: s0, e: e0 } = g.it; await patch('/api/worklog/' + id, { start: s, end: e }); remember(() => patch('/api/worklog/' + id, { start: s0, end: e0 })); await load(['plan', 'tasks']); } catch (err) { toast(err.message); } return unpaint(elOf(g)); }
     unpaint(el); place(g.it, s, e);
   }
   // a break, blocked time or one day of a fixed break (Lunch, …): moved, changed or removed here; a fixed one only on that day
   const saveBusy = async (bu, { s, e, t, remove }) => {
     try {
-      if (bu.id) await (remove ? api('/api/appts/' + bu.id, { method: 'DELETE', body: {} }) : patch('/api/appts/' + bu.id, { start: s, end: e, title: t || undefined }));
-      else await post(`/api/fixed/${bu.fixedId}/day`, { date: isoDate(bu.s), start: s, end: e, title: t || bu.t, remove: !!remove });
+      if (bu.id) {
+        await (remove ? api('/api/appts/' + bu.id, { method: 'DELETE', body: {} }) : patch('/api/appts/' + bu.id, { start: s, end: e, title: t || undefined }));
+        remember(remove ? () => post('/api/appts', { start: bu.s, end: bu.e, title: bu.t, kind: bu.kind === 'break' ? 'break' : 'appt' }) : () => patch('/api/appts/' + bu.id, { start: bu.s, end: bu.e, title: bu.t }));
+      } else {
+        const date = isoDate(bu.s), r = await post(`/api/fixed/${bu.fixedId}/day`, { date, start: s, end: e, title: t || bu.t, remove: !!remove });
+        remember(() => api(`/api/fixed/${bu.fixedId}/day?date=${date}${r?.id ? '&break=' + r.id : ''}`, { method: 'DELETE', body: {} }));
+      }
       await load(['plan']);
     } catch (err) { toast(err.message); }
   };
+  // ⌫ / Delete: the selected item goes; a planned task to the Later list (a repeating one skips this round), an
+  // appointment out of its calendar, a break or a logged session away; ⌘Z puts it back
+  const removeSel = async it => {
+    setSel(null);
+    try {
+      if (it.kind === 'block') {
+        // a block you moved or pinned: back to the planner (⌘Z pins it there again); otherwise the task is deleted
+        const id = it.u.taskId, period = it.u.period || 0, { s, e } = it.b;
+        if (it.b.pinned || moved(it)) { await post(`/api/tasks/${id}/auto`, { period }); remember(() => post(`/api/tasks/${id}/pin`, { period, oldStart: 0, s, e })); }
+        else { const r = await api('/api/tasks/' + id, { method: 'DELETE', body: {} }); remember(() => post('/api/tasks/restore', { token: r.undo })); toast('Deleted'); }
+      } else if (it.kind === 'event') {
+        const ev = it.ev; if (!ev.editable) return;
+        await api(`/api/events/${ev.id}?scope=one`, { method: 'DELETE', body: {} });
+        remember(() => post('/api/events', { calendar_id: ev.calendar_id, title: ev.title, start: ev.start, end: ev.end, all_day: !!ev.all_day, location: ev.location || null, free: !ev.blocks }));
+      } else if (it.kind === 'busy') return saveBusy(it.bu, { remove: true });
+      else if (it.kind === 'log') { const r = await api('/api/worklog/' + it.id, { method: 'DELETE', body: {} }); const w = r.session; remember(() => post('/api/worklog', w)); }
+      await load(['plan', 'tasks']);
+    } catch (err) { toast(err.message); }
+  };
+  const undo = async () => { const fn = undos.current.pop(); if (!fn) return; setSel(null); try { await fn(); await load(['plan', 'tasks']); toast('Undone'); } catch (err) { toast(err.message); } };
+  const keys = useRef(); keys.current = { sel, removeSel, undo, get: k => onScreen.current.get(k) };
+  useEffect(() => {
+    const down = e => {
+      const t = e.target, typing = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+      if (typing || document.querySelector('.modal')) return;
+      const K = keys.current;
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); K.undo(); return; }
+      if ((e.key === 'Backspace' || e.key === 'Delete') && K.sel) { const it = K.get(K.sel); if (it) { e.preventDefault(); K.removeSel(it); } }
+    };
+    addEventListener('keydown', down); return () => removeEventListener('keydown', down);
+  }, []);
   const busySheet = async bu => {
     const r = await openModal(close => { const B = () => {
       const [d, setD] = useState(isoDate(bu.s)), [s, setS] = useState(hm(bu.s)), [e, setE] = useState(hm(bu.e)), [t, setT] = useState(bu.t);
@@ -389,14 +433,14 @@ export default function CalendarView() {
         if (x.lanes > 1) { style.left = `calc(${100 * x.lane / x.lanes}% + 2px)`; style.width = `calc(${100 / x.lanes}% - 4px)`; style.right = 'auto'; }
         if (x.kind === 'past') { const it = x.id && { kind: 'log', id: x.id, task: x.task, s: x.s1, e: x.e1, b: { key: 'w' + x.id, s: x.s1 } };   // a logged session: drag it or its edges to correct it
           return html`<div class=${'ev past' + (x.done ? ' dn' : '') + (it && sel === selKey(it) ? ' sel' : '')} style=${{ ...style, '--c': x.c || 'var(--done)' }} title=${`${x.t}${x.p ? '\n' + x.p : ''}\n${x.tick ? 'Done ' + hm(x.e1) : hm(x.s1) + '–' + hm(x.e1)}`}
-            data-k=${it ? selKey(it) : null} onPointerDown=${it ? e => onDown(e, it) : null} onClick=${!it && x.task ? () => openTask(x.task) : null}>
+            data-k=${it ? reg(it) : null} onPointerDown=${it ? e => onDown(e, it) : null} onClick=${!it && x.task ? () => openTask(x.task) : null}>
           <span class="et"><span class="kind">${I('check', 12)}</span>${x.research ? 'Research · ' : ''}${x.t}</span><span class="em">${x.tick ? 'Done ' + hm(x.e1) : `${hm(x.s1)}–${hm(x.e1)}`}${n === 1 && x.p ? ' · ' + x.p : ''}</span>${it && html`<div class="rs rs-top"></div><div class="rs"></div>`}</div>`; }
         if (x.kind === 'block') { const cur = plan.active && plan.active.task_id === x.u.taskId, fit = Math.floor(((x.e - x.s) / 3600e3 * hh - 44) / 16), pts = n === 1 && fit > 0 ? partPoints(x.u.points, x.b.part, x.b.parts).slice(0, fit) : [];   // only as many points as fit
           // a task in its priority's color; an appointment in its calendar's, the priority at its edge; an ordered project
           // (a thesis, worked through in its order) in its own color, as its calendar
           const ap = isAppt(x.u.meta), own = x.u.ordered, pc = priColor(x.u.pri ?? x.u.priority);
           return html`<div class=${'ev block' + (x.b.pinned ? ' pinned' : '') + (x.u.late ? ' late' : '') + (cur ? ' cur' : '') + (sel === selKey(x) ? ' sel' : '')} style=${{ ...style, background: ap || own ? x.u.p_color : pc, ...(ap ? { borderLeft: `4px solid ${pc}` } : {}) }}
-            data-k=${selKey(x)} onPointerDown=${e => onDown(e, x)} title=${`${x.u.title}\n${x.u.p_name}${x.u.late ? '\nAfter deadline' : ''}${own ? '' : `\nPriority ${['ASAP', 'High', 'Medium', 'Low'][Math.round(x.u.pri ?? x.u.priority)]}`}`}>
+            data-k=${reg(x)} onPointerDown=${e => onDown(e, x)} title=${`${x.u.title}\n${x.u.p_name}${x.u.late ? '\nAfter deadline' : ''}${own ? '' : `\nPriority ${['ASAP', 'High', 'Medium', 'Low'][Math.round(x.u.pri ?? x.u.priority)]}`}`}>
             <span class="et">${isAppt(x.u.meta) ? html`<span class="kind">${I('flex', 12)}</span>` : ''}${x.u.title}</span><span class="em">${hm(x.s)}–${hm(x.e)}${x.b.parts > 1 ? ` · ${x.b.part}/${x.b.parts}` : ''}${n === 1 && x.u.p_name ? ' · ' + x.u.p_name : ''}</span>
             <div class="rs rs-top"></div>${pts.length > 0 && html`<ul class="epts">${pts.map(p => html`<li>${p.t}</li>`)}</ul>`}<div class="rs"></div></div>`; }
         if (x.kind === 'event') {
@@ -406,13 +450,13 @@ export default function CalendarView() {
             ${x.s < x.s0 && html`<div class="ev buf b" style=${{ ...part(x.s, x.s0), ...bc }} onClick=${open} title=${ev.travel?.there ? `${dh(ev.travel.min)} by ${ev.travel.mode}` : dh(ev.before) + ' before'}>${(x.s0 - x.s) / 3600e3 * hh > 14 ? html`${ev.travel?.there ? html`<span class="way">${I(ev.travel.mode, 11)}</span>` : ''}${dh(ev.before)}` : ''}</div>`}
             ${(() => { const it = { kind: 'event', ev, s: ev.start, e: ev.end, b: { key: 'e' + ev.id, s: ev.start } };
               return html`<div class=${'ev busy' + (x.free ? ' free' : '') + (ev.before || ev.after ? ' hasb' : '') + (sel === selKey(it) ? ' sel' : '')} style=${{ ...part(x.s0, x.e0), ...bc, ...(x.color && !x.free ? { borderLeft: `3px solid ${x.color}` } : {}) }} title=${`${x.t}\n${x.cal}`}
-                data-k=${selKey(it)} onPointerDown=${e => onDown(e, it)}>
+                data-k=${reg(it)} onPointerDown=${e => onDown(e, it)}>
                 <span class="et"><span class="kind">${I(ev.done ? 'check' : 'pin', 12)}</span>${x.t}<${AlsoDots} ev=${ev}/></span><span class="em">${hm(ev.start)}–${hm(ev.end)} · ${x.cal}</span>${ev.editable && html`<div class="rs rs-top"></div><div class="rs"></div>`}</div>`; })()}
             ${x.e > x.e0 && html`<div class="ev buf a" style=${{ ...part(x.e0, x.e), ...bc }} onClick=${open} title=${ev.travel?.home ? `Home: ${dh(ev.travel.min)} by ${ev.travel.mode}` : dh(ev.after) + ' after'}>${(x.e - x.e0) / 3600e3 * hh > 14 ? html`${ev.travel?.home ? html`<span class="way">${I(ev.travel.mode, 11)}</span>` : ''}${dh(ev.after)}` : ''}</div>`}`;
         }
         const bu = x.busy, it = { kind: 'busy', bu, s: bu.s, e: bu.e, t: x.t, b: { key: bu.id ? 'a' + bu.id : 'f' + bu.bid, s: bu.s } }, edit = !!(bu.id || bu.fixedId);
         return html`<div class=${'ev ' + x.kind + (edit ? ' rm' : '') + (sel === selKey(it) ? ' sel' : '')} style=${style} title=${x.t}
-          data-k=${selKey(it)} onPointerDown=${edit ? e => onDown(e, it) : null}>
+          data-k=${edit ? reg(it) : selKey(it)} onPointerDown=${edit ? e => onDown(e, it) : null}>
           <span class="et">${x.t}</span><span class="em">${hm(x.s)}–${hm(x.e)}</span>${edit && html`<div class="rs rs-top"></div><div class="rs"></div>`}</div>`;
       })}
       ${mini.map(x => html`<div class="ev mini" style=${{ top: top(x.s0) + 'px', height: Math.max(6, (x.e0 - x.s0) / 3600e3 * hh - 2) + 'px', '--c': x.color || 'var(--faint)' }} title=${`${x.t}\n${hm(x.ev.start)}–${hm(x.ev.end)} · ${x.cal}`} onClick=${() => eventSheet(x.ev)}></div>`)}
