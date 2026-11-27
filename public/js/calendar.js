@@ -23,15 +23,15 @@ function lanes(items) {   // side-by-side layout for overlapping items
   flush(); return items;
 }
 // New: the same choices from the + button and from an empty spot in the calendar (there: at the time clicked)
-export async function newMenu({ at = null, project_id } = {}) {
-  const v = await openModal(close => html`<div class="modal sm"><h3>${at ? `${DN[new Date(at).getDay()]} ${SH(at)}, ${hm(at)}` : 'New'}</h3><div class="menu">
+export async function newMenu({ at = null, end = null, project_id } = {}) {
+  const v = await openModal(close => html`<div class="modal sm"><h3>${at ? `${DN[new Date(at).getDay()]} ${SH(at)}, ${hm(at)}${end ? '–' + hm(end) : ''}` : 'New'}</h3><div class="menu">
     <button onClick=${() => close('task')}>${I('list')}Task</button>
     <button onClick=${() => close('appt')}>${I('calendar')}Appointment</button>
     <button onClick=${() => close('break')}>${I('cup')}Break / Block Time</button></div>
     <div class="acts"><button onClick=${() => close(null)}>Cancel</button></div></div>`);
-  if (v === 'task') { const t = await openTask('new', { ...(project_id ? { project_id } : {}), ...(at ? { at } : {}) }); if (at && t?.id) { await post(`/api/tasks/${t.id}/pin`, { period: t.period || 0, s: at, e: at + (t.duration || 30) * 60000 }); load(['plan']); } }
-  if (v === 'appt') newAppointment(at);
-  if (v === 'break') blockTime(at);
+  if (v === 'task') { const t = await openTask('new', { ...(project_id ? { project_id } : {}), ...(at ? { at } : {}), ...(end ? { duration: Math.round((end - at) / 60000) } : {}) }); if (at && t?.id) { await post(`/api/tasks/${t.id}/pin`, { period: t.period || 0, s: at, e: end || at + (t.duration || 30) * 60000 }); load(['plan']); } }
+  if (v === 'appt') newAppointment(at, end);
+  if (v === 'break') blockTime(at, end);
 }
 const store = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const stored = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
@@ -368,25 +368,31 @@ export default function CalendarView() {
         // a block you moved or pinned: back to the planner (⌘Z pins it there again); otherwise the task is deleted
         const id = it.u.taskId, period = it.u.period || 0, { s, e } = it.b;
         if (it.b.pinned || moved(it)) { await post(`/api/tasks/${id}/auto`, { period }); remember(() => post(`/api/tasks/${id}/pin`, { period, oldStart: 0, s, e })); }
-        else { const r = await api('/api/tasks/' + id, { method: 'DELETE', body: {} }); remember(() => post('/api/tasks/restore', { token: r.undo })); toast('Deleted'); }
+        else { const r = await api('/api/tasks/' + id, { method: 'DELETE', body: {} }); remember(() => post('/api/tasks/restore', { token: r.undo })); }
       } else if (it.kind === 'event') {
         const ev = it.ev; if (!ev.editable) return;
         await api(`/api/events/${ev.id}?scope=one`, { method: 'DELETE', body: {} });
         remember(() => post('/api/events', { calendar_id: ev.calendar_id, title: ev.title, start: ev.start, end: ev.end, all_day: !!ev.all_day, location: ev.location || null, free: !ev.blocks }));
-      } else if (it.kind === 'busy') return saveBusy(it.bu, { remove: true });
+      } else if (it.kind === 'busy') { await saveBusy(it.bu, { remove: true }); return toast('Removed', 6000, undo); }
       else if (it.kind === 'log') { const r = await api('/api/worklog/' + it.id, { method: 'DELETE', body: {} }); const w = r.session; remember(() => post('/api/worklog', w)); }
       await load(['plan', 'tasks']);
+      toast(it.kind === 'block' && (it.b.pinned || moved(it)) ? 'Back to auto-schedule' : it.kind === 'block' && it.u.recur ? 'Skipped' : 'Deleted', 6000, undo);
     } catch (err) { toast(err.message); }
   };
   const undo = async () => { const fn = undos.current.pop(); if (!fn) return; setSel(null); try { await fn(); await load(['plan', 'tasks']); toast('Undone'); } catch (err) { toast(err.message); } };
-  const keys = useRef(); keys.current = { sel, removeSel, undo, get: k => onScreen.current.get(k) };
+  const keys = useRef(); keys.current = { sel, removeSel, undo, get: k => onScreen.current.get(k), today, switchMode, step };
   useEffect(() => {
     const down = e => {
       const t = e.target, typing = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
       if (typing || document.querySelector('.modal')) return;
       const K = keys.current;
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); K.undo(); return; }
-      if ((e.key === 'Backspace' || e.key === 'Delete') && K.sel) { const it = K.get(K.sel); if (it) { e.preventDefault(); K.removeSel(it); } }
+      if ((e.key === 'Backspace' || e.key === 'Delete') && K.sel) { const it = K.get(K.sel); if (it) { e.preventDefault(); K.removeSel(it); } return; }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 't') K.today(); else if (k === 'd') K.switchMode('day'); else if (k === 'w') K.switchMode('week'); else if (k === 'm') K.switchMode('month');
+      else if (e.key === 'ArrowLeft') K.step(-1); else if (e.key === 'ArrowRight') K.step(1); else return;
+      e.preventDefault();
     };
     addEventListener('keydown', down); return () => removeEventListener('keydown', down);
   }, []);
@@ -398,7 +404,7 @@ export default function CalendarView() {
         <input type="text" style="width:100%;margin-top:8px" placeholder="Title" value=${t} onInput=${x => setT(x.target.value)}/>
         <div class="acts"><button class="danger" onClick=${() => close({ remove: true })}>${bu.id ? 'Remove' : 'Skip This Day'}</button><span style="flex:1"></span><button onClick=${() => close(null)}>Cancel</button><button class="pri" onClick=${() => close({ d, s, e, t })}>Save</button></div></div>`; }; return html`<${B}/>`; });
     if (!r) return;
-    if (r.remove) return saveBusy(bu, { remove: true });
+    if (r.remove) { await saveBusy(bu, { remove: true }); return toast('Removed', 6000, undo); }
     const base = fromIso(r.d), toMs = x => base + (+x.slice(0, 2) * 60 + +x.slice(3)) * 60000;
     if (toMs(r.e) <= toMs(r.s)) return toast('End must be after start');
     saveBusy(bu, { s: toMs(r.s), e: toMs(r.e), t: r.t.trim() });
@@ -413,7 +419,18 @@ export default function CalendarView() {
     if (v === 'auto') { try { await post(`/api/tasks/${it.u.taskId}/auto`, { period: it.u.period || 0 }); await load(['plan', 'tasks']); } catch (e) { toast(e.message); } }
   };
   const eventSheet = ev => { if (who === st.me.id) openEventSheet(ev); };
+  const [ghost, setGhost] = useState(null), made = useRef(false);
+  const createDown = (e, d0) => {
+    if (e.target !== e.currentTarget || e.pointerType !== 'mouse' || e.button !== 0 || who !== st.me.id) return;
+    const col = e.currentTarget, top = col.getBoundingClientRect().top, at = y => d0 + Math.round(((y - top) / hh + H0) * 4) * 900000;
+    const a = d0 + Math.floor(((e.clientY - top) / hh + H0) * 4) * 900000, y0 = e.clientY;
+    const move = m => { if (Math.abs(m.clientY - y0) < 8) return; const b = at(m.clientY); setGhost({ d0, s: Math.min(a, b), e: Math.max(a + 900000, b) }); };
+    const up = m => { removeEventListener('pointermove', move); removeEventListener('pointerup', up);
+      if (Math.abs(m.clientY - y0) >= 8) { made.current = true; const b = at(m.clientY), s = Math.min(a, b), en = Math.max(a + 900000, b); setGhost(null); setSel(null); newMenu({ at: s, end: en }); } };
+    addEventListener('pointermove', move); addEventListener('pointerup', up);
+  };
   const clickEmpty = async (e, d0) => {
+    if (made.current) { made.current = false; return; }   // that was a drag: New is already open
     if (e.target !== e.currentTarget) return;
     if (sel) return setSel(null);
     const y = e.clientY - e.currentTarget.getBoundingClientRect().top, ms = d0 + Math.floor((y / hh + H0) * 4) * 900000;
@@ -427,7 +444,8 @@ export default function CalendarView() {
   const days = Array.from({ length: span }, (_, i) => addDays(from, i));
 
   const renderCol = d0 => { const { out, mini } = dayItems(d0);
-    return html`<div class=${'daycol' + (d0 === t0 ? ' today' : '')} key=${d0} onClick=${e => clickEmpty(e, d0)}>
+    return html`<div class=${'daycol' + (d0 === t0 ? ' today' : '')} key=${d0} onPointerDown=${e => createDown(e, d0)} onClick=${e => clickEmpty(e, d0)}>
+      ${ghost && ghost.d0 === d0 && html`<div class="ev ghost" style=${{ top: top(ghost.s) + 'px', height: (ghost.e - ghost.s) / 3600e3 * hh - 2 + 'px' }}><span class="em">${hm(ghost.s)}–${hm(ghost.e)}</span></div>`}
       ${out.map(x => {
         const style = { top: top(x.s) + 'px', height: Math.max(14, (x.e - x.s) / 3600e3 * hh - 2) + 'px' };
         if (x.lanes > 1) { style.left = `calc(${100 * x.lane / x.lanes}% + 2px)`; style.width = `calc(${100 / x.lanes}% - 4px)`; style.right = 'auto'; }
@@ -441,7 +459,7 @@ export default function CalendarView() {
           const ap = isAppt(x.u.meta), own = x.u.ordered, pc = priColor(x.u.pri ?? x.u.priority);
           return html`<div class=${'ev block' + (x.b.pinned ? ' pinned' : '') + (x.u.late ? ' late' : '') + (cur ? ' cur' : '') + (sel === selKey(x) ? ' sel' : '')} style=${{ ...style, background: ap || own ? x.u.p_color : pc, ...(ap ? { borderLeft: `4px solid ${pc}` } : {}) }}
             data-k=${reg(x)} onPointerDown=${e => onDown(e, x)} title=${`${x.u.title}\n${x.u.p_name}${x.u.late ? '\nAfter deadline' : ''}${own ? '' : `\nPriority ${['ASAP', 'High', 'Medium', 'Low'][Math.round(x.u.pri ?? x.u.priority)]}`}`}>
-            <span class="et">${isAppt(x.u.meta) ? html`<span class="kind">${I('flex', 12)}</span>` : ''}${x.u.title}</span><span class="em">${hm(x.s)}–${hm(x.e)}${x.b.parts > 1 ? ` · ${x.b.part}/${x.b.parts}` : ''}${n === 1 && x.u.p_name ? ' · ' + x.u.p_name : ''}</span>
+            <span class="et">${x.u.late ? html`<span class="kind" title="At risk: after its due date">${I('warn', 12)}</span>` : isAppt(x.u.meta) ? html`<span class="kind">${I('flex', 12)}</span>` : ''}${x.u.title}</span><span class="em">${hm(x.s)}–${hm(x.e)}${x.b.parts > 1 ? ` · ${x.b.part}/${x.b.parts}` : ''}${n === 1 && x.u.p_name ? ' · ' + x.u.p_name : ''}</span>
             <div class="rs rs-top"></div>${pts.length > 0 && html`<ul class="epts">${pts.map(p => html`<li>${p.t}</li>`)}</ul>`}<div class="rs"></div></div>`; }
         if (x.kind === 'event') {
           const ev = x.ev, part = (s0, e0) => ({ ...style, top: top(s0) + 'px', height: Math.max(4, (e0 - s0) / 3600e3 * hh - (e0 === x.e ? 2 : 0)) + 'px' });

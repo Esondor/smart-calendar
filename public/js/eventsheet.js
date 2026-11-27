@@ -5,16 +5,18 @@ import { I } from './icons.js';
 
 export const googleCals = () => S.state.accounts.filter(a => a.kind === 'google' && a.status === 'ok').flatMap(a => a.calendars.filter(c => c.writable && c.id !== S.state.settings?.plan?.calendarId).map(c => ({ ...c, acc: a.id })));
 export const atTime = (day, t) => fromIso(day) + (+t.slice(0, 2) * 60 + +t.slice(3)) * 60000;
-// title, day, times and calendar of an event; repeating events: this one or all
+// title, start and end (side by side, as when adding one), all day, calendar, place; repeating events: this one or all
 export function EventFields({ f, set, cals, recurring, onTravel, travel }) {
+  // moving the start keeps the length
+  const setStart = x => { const n = { ...f, ...x }; if (!f.all_day) { const len = atTime(f.ed, f.e) - atTime(f.day, f.s), e = atTime(n.day, n.s) + Math.max(len, 5 * 60000); n.ed = isoDate(e); n.e = hm(e); } else if (n.ed < n.day) n.ed = n.day; set(n); };
   return html`<input type="text" class="ttl" placeholder="Title" value=${f.title} onInput=${e => set({ title: e.target.value })}/>
-    <div class="box" style="margin-top:10px">
+    <div class="box appt" style="margin-top:10px">
+      <div class="cell two"><div><span class="lbl">Start</span><${DateTime} d=${f.day} t=${f.s} empty=${f.all_day} setD=${v => setStart({ day: v })} setT=${v => setStart({ s: v || f.s })}/></div>
+        <div><span class="lbl">End</span><${DateTime} d=${f.ed} t=${f.e} empty=${f.all_day} setD=${v => set({ ed: v })} setT=${v => set({ e: v || f.e })}/></div></div>
       <label class="cell"><span>All day</span><input type="checkbox" checked=${f.all_day} onChange=${e => set({ all_day: e.target.checked })}/></label>
-      <div class="cell"><span>Day</span><input type="date" value=${f.day} onInput=${e => set({ day: e.target.value })}/></div>
-      ${!f.all_day && html`<div class="cell"><span>Time</span><span class="row" style="gap:6px;flex:none"><input class="t24" value=${f.s} onChange=${e => set({ s: n24(e.target.value) || f.s })}/>–<input class="t24" value=${f.e} onChange=${e => set({ e: n24(e.target.value) || f.e })}/></span></div>`}
-      <div class="cell"><span>Place</span><${PlaceInput} value=${f.location || ''} onChange=${v => set({ location: v })} onTravel=${onTravel} travel=${travel}/></div>
       ${cals.length > 1 && html`<div class="cell"><span>Calendar</span><select value=${f.cal} onChange=${e => set({ cal: +e.target.value })}>${cals.map(c => html`<option value=${c.id}>${c.name}</option>`)}</select></div>`}
-      ${recurring && html`<div class="cell"><span>Change</span><div class="seg"><button type="button" class=${f.scope === 'one' ? 'on' : ''} onClick=${() => set({ scope: 'one' })}>This Event</button><button type="button" class=${f.scope === 'all' ? 'on' : ''} onClick=${() => set({ scope: 'all' })}>All</button></div></div>`}
+      <div class="cell"><span>Place</span><${PlaceInput} value=${f.location || ''} onChange=${v => set({ location: v })} onTravel=${onTravel} travel=${travel}/></div>
+      ${recurring && html`<div class="cell"><span>Change</span><${SwitchN} opts=${[['one', 'This Event'], ['all', 'All']]} value=${f.scope} set=${v => set({ scope: v })}/></div>`}
     </div>`;
 }
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
@@ -99,7 +101,7 @@ export async function openEventSheet(ev) {
   try { const c = await api('/api/clashes'); const it = c.items.find(i => (i.g_cal === ev.calendar_id && i.g_ext === ev.ext_id) || (i.m_cal === ev.calendar_id && i.m_ext === ev.ext_id)); if (it) clash = { tag: c.tag, it }; } catch {}
   const timed = !ev.all_day && ev.end - ev.start < 864e5, sets = Object.keys(S.state.settings?.hours || {});
   const own = googleCals(), acc = own.find(c => c.id === ev.calendar_id)?.acc, cals = own.filter(c => c.acc === acc);
-  const e0 = { title: ev.title, all_day: !timed, day: isoDate(ev.start), s: hm(ev.start), e: hm(ev.end), cal: ev.calendar_id, scope: 'one',
+  const e0 = { title: ev.title, all_day: !timed, day: isoDate(ev.start), s: hm(ev.start), ed: isoDate(timed ? ev.end : ev.end - 1), e: hm(ev.end), cal: ev.calendar_id, scope: 'one',
     location: ev.location || '', hours: ev.win ? '*' : ev.hours || '', win: ev.win || { days: [1, 2, 3, 4, 5], s: hm(ev.start), e: hm(ev.end) }, rank: ev.rankSet || null };
   // closed without Save or Discard (×, outside, pulled down, back): changes are saved anyway
   const f0 = { before: ev.before, after: ev.after, block: ev.blocks, ...e0 }, cur = { f: f0 };
@@ -116,9 +118,11 @@ export async function openEventSheet(ev) {
       ${clash && html`<div class="sect" style="margin:0 4px 6px">Clash</div><${ClashCard} c=${clash.it} tag=${clash.tag} onChange=${() => load(['plan'])}/>`}
       <div class="box"><label class="cell"><span>Blocks time</span><input type="checkbox" checked=${f.block} onChange=${e => setF({ ...f, block: e.target.checked })}/></label>
         ${timed && html`<div class="cell"><span>Before</span>${pick('before')}</div><div class="cell"><span>After</span>${pick('after')}</div>`}
-        ${ev.editable && timed && html`<div class="cell"><span>Times</span><select value=${f.hours} onChange=${e => setF({ ...f, hours: e.target.value })}><option value="">Any</option><option value="*">From – To</option>${sets.map(n => html`<option value=${n}>${cap(n)}</option>`)}</select></div>`}
-        ${ev.editable && timed && f.hours === '*' && html`<div class="cell"><span>Between</span><span class="row" style="gap:6px;flex:none"><input class="t24" value=${f.win.s} onChange=${e => setF({ ...f, win: { ...f.win, s: n24(e.target.value) || f.win.s } })}/>–<input class="t24" value=${f.win.e} onChange=${e => setF({ ...f, win: { ...f.win, e: n24(e.target.value) || f.win.e } })}/></span></div>
-          <div class="cell"><div class="seg days">${WD.map(([d, l]) => html`<button type="button" class=${f.win.days.includes(d) ? 'on' : ''} onClick=${() => setF({ ...f, win: { ...f.win, days: f.win.days.includes(d) ? f.win.days.filter(x => x !== d) : [...f.win.days, d] } })}>${l}</button>`)}</div></div>`}</div>
+        ${ev.editable && timed && html`
+          <label class="cell"><span>Certain time window</span><input type="checkbox" checked=${f.hours === '*'} onChange=${e => setF({ ...f, hours: e.target.checked ? '*' : '' })}/></label>
+          ${f.hours === '*' ? html`<div class="cell"><span>Between</span><span class="row" style="gap:6px;flex:none"><input class="t24" value=${f.win.s} onChange=${e => setF({ ...f, win: { ...f.win, s: n24(e.target.value) || f.win.s } })}/>–<input class="t24" value=${f.win.e} onChange=${e => setF({ ...f, win: { ...f.win, e: n24(e.target.value) || f.win.e } })}/></span></div>
+            <div class="cell"><div class="seg days">${WD.map(([d, l]) => html`<button type="button" class=${f.win.days.includes(d) ? 'on' : ''} onClick=${() => setF({ ...f, win: { ...f.win, days: f.win.days.includes(d) ? f.win.days.filter(x => x !== d) : [...f.win.days, d] } })}>${l}</button>`)}</div></div>`
+          : html`<div class="cell"><span>In</span><${SwitchN} opts=${[['', 'Any'], ...hoursOpts()]} value=${f.hours} set=${v => setF({ ...f, hours: v })}/></div>`}`}</div>
       ${ev.editable && timed && rankOrder().order.length > 1 && html`<${EventRank} ev=${ev} value=${f.rank} set=${v => setF({ ...f, rank: v })}/>`}
       ${ev.editable && html`<${AlsoIn} ev=${ev}/>`}
       ${timed && ev.start <= Date.now() + 15 * 60000 && (ev.end > Date.now() || ev.track) && !ev.done && html`<div class="sect" style="margin:16px 4px 6px">Track</div><div class="menu">
@@ -160,8 +164,8 @@ export async function openEventSheet(ev) {
     } else if (ev.editable) {
       const ch = {};
       if (r.title.trim() && r.title !== e0.title) ch.title = r.title.trim();
-      if (r.day !== e0.day || r.s !== e0.s || r.e !== e0.e || r.all_day !== e0.all_day) {
-        ch.start = r.all_day ? fromIso(r.day) : atTime(r.day, r.s); ch.end = r.all_day ? addDays(fromIso(r.day), Math.max(1, Math.round((ev.end - ev.start) / 864e5))) : atTime(r.day, r.e); ch.all_day = r.all_day;
+      if (r.day !== e0.day || r.ed !== e0.ed || r.s !== e0.s || r.e !== e0.e || r.all_day !== e0.all_day) {
+        ch.start = r.all_day ? fromIso(r.day) : atTime(r.day, r.s); ch.end = r.all_day ? addDays(fromIso(r.ed < r.day ? r.day : r.ed), 1) : atTime(r.ed, r.e); ch.all_day = r.all_day;
         if (!(ch.end > ch.start)) return toast('End must be after start');
       }
       if (r.cal !== e0.cal) ch.calendar_id = r.cal;
@@ -211,12 +215,12 @@ export const SwitchN = ({ opts, value, set }) => { const i = Math.max(0, opts.fi
 export const hoursOpts = () => [...Object.keys(S.state.settings?.hours || { work: 1, personal: 1 }).map(n => [n, cap(n)]), ['all', 'All day']];
 export const Switch2 = ({ a, b, right, set }) => html`<button type="button" class=${'sw2' + (right ? ' r' : '')} onClick=${() => set(!right)}><span>${a}</span><span>${b}</span></button>`;
 export const DateTime = ({ d, t, setD, setT, empty }) => html`<div class="dt"><input type="date" value=${d} onInput=${e => setD(e.target.value)}/>${!empty && html`<div class="tm"><input class="t24" value=${t} placeholder="--:--" onChange=${e => setT(n24(e.target.value) || '')}/></div>`}</div>`;
-export async function newAppointment(at = null) {
+export async function newAppointment(at = null, end = null) {
   const cals = googleCals(), names = Object.keys(S.state.settings?.hours || { work: 1, personal: 1 });
-  const t0 = at || Math.ceil(Date.now() / 300000) * 300000;
+  const t0 = at || Math.ceil(Date.now() / 300000) * 300000, t1 = end && end > t0 ? end : t0 + 3600e3;
   const r = await openModal(close => { const B = () => {
-    const [f, setF] = useState({ title: '', plan: !cals.length, sd: isoDate(t0), st: hm(t0), ed: isoDate(t0 + 3600e3), et: hm(t0 + 3600e3), dd: '', dt: '',
-      all_day: false, block: true, minutes: 30, when: (at && hoursAt(at)) || (names.includes('personal') ? 'personal' : names[0]), win: false, days: [1, 2, 3, 4, 5], ws: '08:00', we: '11:00',
+    const [f, setF] = useState({ title: '', plan: !cals.length, sd: isoDate(t0), st: hm(t0), ed: isoDate(t1), et: hm(t1), dd: '', dt: '',
+      all_day: false, block: true, minutes: end ? Math.round((t1 - t0) / 60000) : 30, when: (at && hoursAt(at)) || (names.includes('personal') ? 'personal' : names[0]), win: false, days: [1, 2, 3, 4, 5], ws: '08:00', we: '11:00',
       priority: 2, cal: cals.length ? String((cals.find(c => String(c.id) === lastUsed('cal')) || cals.find(c => c.use_busy) || cals[0]).id) : '', location: '', travel: 0, notes: '' });
     const set = x => setF({ ...f, ...x }), plan = f.plan;
     // moving the start keeps the length; the end never before the start

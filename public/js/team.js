@@ -25,7 +25,7 @@ function TeamPanel({ p, close }) {
     <div class="fhead"><b class="grow">Others' Plan</b><button class="icon" title="Close" onClick=${close}>${I('x', 16)}</button></div>
     <div class="flist">${data == null ? '' : !days.length ? html`<p class="hint">Nothing planned</p>`
       : days.map(d => html`<div class="tday">${d.k === today ? 'Today' : d.k === today + 864e5 ? 'Tomorrow' : `${DN[new Date(d.k).getDay()]} ${SH(d.k)}`}</div>
-        ${d.items.map(b => html`<button class="ffile" onClick=${() => openTask(b.task)}>
-          <${Avatar} id=${b.user}/><span class="grow fn">${b.title}</span><span class="hint">${hm(b.start)}–${hm(b.end)}</span></button>`)}`)}</div>
+        <div class="tgroup">${d.items.map(b => html`<button class="ffile" onClick=${() => openTask(b.task)}>
+          <${Avatar} id=${b.user}/><span class="grow fn">${b.title}</span><span class="hint">${hm(b.start)}–${hm(b.end)}</span></button>`)}</div>`)}</div>
   </aside>`;
 }

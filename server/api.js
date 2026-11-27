@@ -46,7 +46,7 @@ function schedInfo(t, plans) {
     for (const [k, u] of Object.entries(p.units)) {
       if (u.t.id !== t.id) continue;
       const i = p.info[k] || {};
-      const cand = { key: k, period: u.period, user: uid, first: i.first, end: i.end, late: i.late, unplaced: i.unplaced, deadline: u.deadline, overdue: !!u.overdue, periodStart: u.periodStart, periodEnd: u.periodEnd, remaining: Math.max(0, (u.t.duration || 0) - u.spent) };
+      const cand = { key: k, period: u.period, user: uid, first: i.first, end: i.end, late: i.late, pri: u.pri ?? u.t.priority, ordered: !!u.ordered, unplaced: i.unplaced, deadline: u.deadline, overdue: !!u.overdue, periodStart: u.periodStart, periodEnd: u.periodEnd, remaining: Math.max(0, (u.t.duration || 0) - u.spent) };
       if (!best || (cand.first || Infinity) < (best.first || Infinity)) best = cand;
     }
   }

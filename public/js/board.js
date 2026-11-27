@@ -1,4 +1,4 @@
-import { html, useState, useEffect, S, api, post, patch, del, load, toast, openModal, confirmDialog, when, dh, Avatar, recurText, SH, fromIso, go, InviteBox } from './lib.js';
+import { html, useState, useEffect, S, api, post, patch, del, load, toast, openModal, confirmDialog, when, dh, Avatar, recurText, SH, fromIso, go, InviteBox, priColor } from './lib.js';
 import { openTask } from './taskedit.js';
 import { I } from './icons.js';
 import OutlineView from './outline.js';
@@ -77,12 +77,12 @@ async function share(p) {
 }
 
 function Card({ t, cols, onDragStart }) {
-  const s = t.sched, roundDone = t.recur && (t.occ || []).some(o => o.period === t.period && o.status === 'done');
+  const s = t.sched, ordered = !!s?.ordered, roundDone = t.recur && (t.occ || []).some(o => o.period === t.period && o.status === 'done');
   const done = t.status === 'done' || roundDone;
   const check = async e => { e.stopPropagation(); try { await post(`/api/tasks/${t.id}/done`, { period: roundDone ? t.period : (s?.period ?? t.period ?? 0), done: !done }); await load(['tasks', 'plan']); } catch (x) { toast(x.message); } };
   const next = async e => { e.stopPropagation(); await patch('/api/tasks/' + t.id, { col: Math.min(cols - 1, t.col + 1) }); load(['tasks', 'plan']); };
   return html`<div class=${'card' + (done ? ' done' : '')} draggable="true" onDragStart=${e => onDragStart(e, t)} onClick=${() => openTask(t.id)}>
-    <div class="ct"><input type="checkbox" checked=${done} onClick=${check}/><span>${t.title}</span><span class=${'flag p' + t.priority}></span></div>
+    <div class="ct"><input type="checkbox" checked=${done} onClick=${check}/><span>${t.title}</span>${!ordered && html`<span class="flag" style=${{ background: priColor(t.sched?.pri ?? t.priority) }}></span>`}</div>
     <div class="cm">
       ${t.recur && html`<span class="chip">${I('repeat', 12)}${recurText(t.recur).replace(/^every /, '')}</span>`}
       <span class="chip">${dh(t.duration)}</span>

@@ -25,7 +25,7 @@ function Editor({ task, opts, close }) {
   const tOf = (d, ms) => d && +ms && isoDate(+ms) === d ? hm(+ms) : '';
   const now5 = opts.at || Math.ceil(Date.now() / 300000) * 300000;   // from the calendar: the time clicked
   const [f, setF] = useState(() => task ? { ...task, recur: task.recur || null, st: tOf(task.start_after, task.meta?.from), dt: tOf(task.deadline, task.meta?.due), win: !!task.meta?.win } : {
-    title: opts.title || '', project_id: defProject, duration: st.settings?.dFree || 60, priority: 2, deadline: '', start_after: isoDate(now5), st: hm(now5), dt: '', assignee_id: st.me.id, win: false,
+    title: opts.title || '', project_id: defProject, duration: opts.duration || st.settings?.dFree || 60, priority: 2, deadline: '', start_after: isoDate(now5), st: hm(now5), dt: '', assignee_id: st.me.id, win: false,
     auto: true, schedule: (opts.at && hoursAt(opts.at)) || null, recur: null, points: [], notes: '', min_chunk: null, assign_mode: 'fixed', parent_id: opts.parent_id || null, col: opts.col || 0, location: '', meta: {} });
   const [busy, setBusy] = useState(false), [tried, setTried] = useState(false);
   const set = p => setF(x => ({ ...x, ...p }));

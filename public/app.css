@@ -1134,3 +1134,15 @@ button.pri.off{opacity:.45}
 /* the due's clear button sits by its label, so start and due times line up */
 .appt .cell.two .lbl{display:flex;align-items:center;justify-content:space-between;min-height:20px}
 .appt .cell.two .lbl .icon{width:22px;height:22px;min-width:22px;min-height:22px;padding:0;background:none}
+
+/* side panels (Files, Others' Plan): the close button stays its own size in the corner; Others' Plan as tall as its list,
+   each day's entries in one card like the other lists */
+aside.files .fhead button.icon{width:auto;flex:none;border-radius:50%}
+aside.files.team{bottom:auto;max-height:calc(100% - 20px)}
+aside.files .tgroup{background:var(--row,var(--fill));border-radius:12px;overflow:hidden}
+aside.files .tgroup .ffile{border-radius:0;padding:9px 12px;border-top:1px solid var(--row-line,var(--line))}
+aside.files .tgroup .ffile:first-child{border-top:0}
+
+/* a range being dragged on empty space (mouse): where the new entry will be */
+.ev.ghost{left:2px;right:2px;background:var(--acc-s);border:1.5px dashed var(--acc);color:var(--acc);pointer-events:none;z-index:3}
+@media (pointer:fine){.daycol{cursor:cell}}

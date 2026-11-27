@@ -1,7 +1,7 @@
 import { html, useState, useEffect, S, api, post, patch, load, toast, openModal, askMinutes, startOfDay, addDays, hm, minsOf, dayLabel, DN, SH, dh, clock, n24, isoDate, fromIso, when, placeText, isAppt } from './lib.js';
 import { openTask } from './taskedit.js';
 import { I } from './icons.js';
-import { openEventSheet, finishEvent, ClashCard, AlsoDots } from './eventsheet.js';
+import { openEventSheet, finishEvent, ClashCard, AlsoDots, DateTime, atTime } from './eventsheet.js';
 
 export const keyParts = k => { const [t, p] = String(k).split('@'); return { task: +t, period: p == null ? 0 : +p }; };
 export function unitOf(plan, key) { return plan.units[key] || plan.nextUnits?.[key] || null; }
@@ -143,19 +143,21 @@ async function askResearch(plan) {
   else await post('/api/timer/research', { task: u.taskId, period: u.period || 0, minutes: r.m, note: r.note });
   load(['plan']);
 }
-// Break / Block Time at a time you choose: shown like Lunch, the plan works around it; from the calendar at the time clicked
-export async function blockTime(date) {
-  const t0 = date && date !== startOfDay(date) ? date : Math.ceil(Date.now() / 900000) * 900000;
+// Break / Block Time at a time you choose: shown like Lunch, the plan works around it; from the calendar at the time
+// clicked (or the range dragged). The same Start | End as an appointment.
+export async function blockTime(date, end = null) {
+  const t0 = date && date !== startOfDay(date) ? date : Math.ceil(Date.now() / 900000) * 900000, t1 = end && end > t0 ? end : t0 + 30 * 60000;
   const r = await openModal(close => { const B = () => {
-    const [d, setD] = useState(isoDate(date || Date.now())), [s, setS] = useState(hm(t0)), [e, setE] = useState(hm(t0 + 30 * 60000)), [t, setT] = useState('');
-    return html`<div class="modal sm"><h3>Break / Block Time</h3>
-      <div class="row"><input type="date" value=${d} onInput=${x => setD(x.target.value)}/><input class="t24" value=${s} onChange=${x => setS(n24(x.target.value) || s)}/>–<input class="t24" value=${e} onChange=${x => setE(n24(x.target.value) || e)}/></div>
-      <input type="text" style="width:100%;margin-top:8px" placeholder="Break" value=${t} onInput=${x => setT(x.target.value)}/>
-      <div class="acts"><button onClick=${() => close(null)}>Cancel</button><button class="pri" onClick=${() => close({ d, s, e, t })}>Add</button></div></div>`; }; return html`<${B}/>`; });
+    const [f, setF] = useState({ sd: isoDate(t0), st: hm(t0), ed: isoDate(t1), et: hm(t1), t: '', tried: false }), set = x => setF({ ...f, ...x });
+    const s = atTime(f.sd, f.st), e = atTime(f.ed, f.et), ok = e > s;
+    const setStart = x => { const n = { ...f, ...x }, ne = atTime(n.sd, n.st) + Math.max(e - s, 5 * 60000); n.ed = isoDate(ne); n.et = hm(ne); setF(n); };
+    return html`<div class="modal sm appt"><input type="text" class="ttl" placeholder="Break" value=${f.t} onInput=${x => set({ t: x.target.value })}/>
+      <div class="box" style="margin-top:12px"><div class=${'cell two' + (f.tried && !ok ? ' bad' : '')}>
+        <div><span class="lbl">Start</span><${DateTime} d=${f.sd} t=${f.st} setD=${v => setStart({ sd: v })} setT=${v => setStart({ st: v || f.st })}/></div>
+        <div><span class="lbl">End</span><${DateTime} d=${f.ed} t=${f.et} setD=${v => set({ ed: v })} setT=${v => set({ et: v || f.et })}/></div></div></div>
+      <div class="acts"><button onClick=${() => close(null)}>Cancel</button><button class=${'pri' + (ok ? '' : ' off')} onClick=${() => ok ? close({ s, e, t: f.t }) : set({ tried: true })}>Add</button></div></div>`; }; return html`<${B}/>`; });
   if (!r) return;
-  const base = fromIso(r.d), toMs = x => base + (+x.slice(0, 2) * 60 + +x.slice(3)) * 60000;
-  if (toMs(r.e) <= toMs(r.s)) return toast('End must be after start');
-  try { await post('/api/appts', { start: toMs(r.s), end: toMs(r.e), title: r.t.trim() || 'Break', kind: 'break' }); load(['plan']); } catch (e) { toast(e.message); }
+  try { await post('/api/appts', { start: r.s, end: r.e, title: r.t.trim() || 'Break', kind: 'break' }); load(['plan']); } catch (e) { toast(e.message); }
 }
 export function IntrBar({ plan, cols }) {
   const go = async (fn) => { try { await fn(); await load(['plan']); } catch (e) { toast(e.message); } };

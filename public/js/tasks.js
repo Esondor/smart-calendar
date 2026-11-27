@@ -11,11 +11,11 @@ export function TaskRow({ t, showProject = true }) {
   const dl = t.deadline ? fromIso(t.deadline) : null;
   return html`<div class=${'trow' + (done ? ' done' : '')} onClick=${() => openTask(t.id)}>
     <input type="checkbox" checked=${done} onClick=${toggle}/>
-    <span class="tt">${!done && !(p && (p.meta?.ordered ?? p.kind === 'outline')) ? html`<span class="flag" style=${{ background: priColor(t.priority) }} title=${PRI[t.priority]}></span>` : ''}${t.title}${t.recur ? html`<small>${I('repeat', 13)}</small>` : ''}${t.points?.length ? html`<small>${t.points.filter(x => x.done).length}/${t.points.length}</small>` : ''}</span>
+    <span class="tt">${!done && !(p && (p.meta?.ordered ?? p.kind === 'outline')) ? html`<span class="flag" style=${{ background: priColor(s?.pri ?? t.priority) }} title=${PRI[Math.round(s?.pri ?? t.priority)]}></span>` : ''}${t.title}${t.recur ? html`<small>${I('repeat', 13)}</small>` : ''}${t.points?.length ? html`<small>${t.points.filter(x => x.done).length}/${t.points.length}</small>` : ''}</span>
     <span class="meta">
       ${showProject && p && html`<span class="row" style="gap:5px;flex-wrap:nowrap"><span class="flag" style=${{ background: calColor(t.meta?.calendarId) || p.color }}></span>${p.name}</span>`}${isAppt(t.meta) ? html`<span class="kind" title="Appointment">${I('flex', 13)}</span>` : ''}
       <span>${dh(s?.remaining && s.remaining < t.duration ? s.remaining : t.duration)}</span>
-      ${dl && html`<span class=${'chip' + (s?.late ? ' late' : dl < addDays(startOfDay(Date.now()), 2) ? ' warn' : '')}>Due ${SH(dl)}</span>`}
+      ${dl && html`<span class=${'chip' + (s?.late ? ' late' : dl < addDays(startOfDay(Date.now()), 2) ? ' warn' : '')}>${s?.late ? 'At risk · ' : ''}Due ${SH(dl)}${t.meta?.due && new Date(+t.meta.due).toLocaleDateString('sv') === t.deadline ? ', ' + hm(+t.meta.due) : ''}</span>`}
       ${(s?.user || t.assignee_id) && html`<${Avatar} id=${s?.user || t.assignee_id}/>`}
       <span class=${'when' + (s?.late ? ' late' : '')}>${done ? (t.done_at ? SH(t.done_at) : '') : !t.auto ? 'Someday' : s?.first ? when(s.first) : '–'}</span>
     </span></div>`;

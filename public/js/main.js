@@ -20,7 +20,7 @@ addEventListener('appinstalled', () => { window.installPrompt = null; dispatchEv
 if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 // create an account with an invite (link or code) or the registration password
-// + : a task, a fixed appointment (an event in one of your calendars) or a flexible appointment (planned inside its window)
+// + : a task, an appointment (at a time, or planned by Smart Calendar) or a break
 function Register({ back }) {
   const code0 = decodeURIComponent((location.hash.match(/^#\/join\/?([^?]*)/) || [])[1] || '');
   const [f, setF] = useState({ code: code0, name: '', username: '', password: '' }), [inv, setInv] = useState(null), [err, setErr] = useState(''), [busy, setBusy] = useState(false);
