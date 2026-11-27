@@ -188,7 +188,7 @@ export const SwitchN = ({ opts, value, set }) => { const i = Math.max(0, opts.fi
 // your hours to plan in: each set of hours, or all of them together ("All day": never at night)
 export const hoursOpts = () => [...Object.keys(S.state.settings?.hours || { work: 1, personal: 1 }).map(n => [n, cap(n)]), ['all', 'All day']];
 export const Switch2 = ({ a, b, right, set }) => html`<button type="button" class=${'sw2' + (right ? ' r' : '')} onClick=${() => set(!right)}><span>${a}</span><span>${b}</span></button>`;
-export const DateTime = ({ d, t, setD, setT, empty }) => html`<div class="dt"><input type="date" value=${d} onInput=${e => setD(e.target.value)}/>${!empty && html`<input class="t24" value=${t} placeholder="--:--" onChange=${e => setT(n24(e.target.value) || '')}/>`}</div>`;
+export const DateTime = ({ d, t, setD, setT, empty }) => html`<div class="dt"><input type="date" value=${d} onInput=${e => setD(e.target.value)}/>${!empty && html`<div class="tm"><input class="t24" value=${t} placeholder="--:--" onChange=${e => setT(n24(e.target.value) || '')}/></div>`}</div>`;
 export async function newAppointment(at = null) {
   const cals = googleCals(), names = Object.keys(S.state.settings?.hours || { work: 1, personal: 1 });
   const t0 = at || Math.ceil(Date.now() / 300000) * 300000;
@@ -207,7 +207,8 @@ export async function newAppointment(at = null) {
       <div class="box" style="margin-top:12px">
         <div class="cell two"><div><span class="lbl">Start</span><${DateTime} d=${f.sd} t=${f.st} empty=${!plan && f.all_day} setD=${v => setStart({ sd: v })} setT=${v => setStart({ st: v || f.st })}/></div>
           <div><span class="lbl">${plan ? 'Due' : 'End'}</span>${plan
-            ? html`<div class="dt"><input type="date" value=${f.dd} min=${f.sd} onInput=${x => set({ dd: x.target.value })}/>${f.dd && html`<input class="t24" value=${f.dt} placeholder="--:--" onChange=${x => set({ dt: n24(x.target.value) || '' })}/><button type="button" class="icon" title="No due date" onClick=${() => set({ dd: '', dt: '' })}>${I('x', 14)}</button>`}</div>`
+            ? html`<div class="dt">${f.dd ? html`<input type="date" value=${f.dd} min=${f.sd} onInput=${x => set({ dd: x.target.value })}/><div class="tm"><input class="t24" value=${f.dt} placeholder="--:--" onChange=${x => set({ dt: n24(x.target.value) || '' })}/><button type="button" class="icon" title="No due date" onClick=${() => set({ dd: '', dt: '' })}>${I('x', 14)}</button></div>`
+              : html`<button type="button" class="none" onClick=${() => set({ dd: f.sd })}>None</button>`}</div>`
             : html`<${DateTime} d=${f.ed} t=${f.et} empty=${f.all_day} setD=${v => set({ ed: v })} setT=${v => set({ et: v || f.et })}/>`}</div></div>
         ${!plan ? html`
           <label class="cell"><span>All day</span><input type="checkbox" checked=${f.all_day} onChange=${x => set({ all_day: x.target.checked, block: !x.target.checked, ed: x.target.checked ? f.sd : f.ed })}/></label>

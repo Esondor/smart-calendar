@@ -1102,3 +1102,14 @@ aside.files .fhead b{white-space:nowrap}
 .swn::before{content:"";position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px) / var(--n));border-radius:999px;background:var(--acc);box-shadow:0 1px 3px rgba(0,0,0,.25);transform:translateX(calc(var(--i) * 100%));transition:transform .22s cubic-bezier(.3,.7,.3,1)}
 .swn button{position:relative;z-index:1;border:0;background:none;padding:6px 12px;font:inherit;font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap;cursor:pointer;transition:color .2s}
 .swn button.on{color:#fff}
+
+/* centring: switch labels in their part, round − / + also by touch, start and due as date over time */
+.swn button,.sw2 span{justify-content:center;text-align:center;min-height:0;padding:7px 6px}
+.stepper button{width:34px;height:34px;min-width:34px;min-height:34px;border-radius:50%;padding:0;justify-content:center}
+.appt .cell.two>div{min-width:0}
+.appt .dt{display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
+.appt .dt input{width:100%;min-width:0;box-sizing:border-box;text-align:center}
+.appt .dt .tm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
+.appt .dt .tm:not(:has(button)){grid-template-columns:minmax(0,1fr)}
+.appt .dt .none{width:100%;justify-content:center;color:var(--muted);background:var(--fill)}
+.appt .dt input.t24,.appt .dt input[type=date]{width:100%!important;max-width:none}
